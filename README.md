@@ -1,0 +1,104 @@
+# erimercium — stock watchlist agent
+
+A daily email digest over a watchlist of US-listed tickers, plus a chat interface
+through Claude Code for managing the list and researching individual names.
+
+No portfolio, no share counts, no cost basis, no P&L. Just a list of tickers and
+what is happening to them.
+
+## Status
+
+| Stage | Scope | State |
+|---|---|---|
+| 1 | Price digest — flag moves over the threshold, email at 4:30pm ET | **Done** |
+| 2 | Company news + SEC filings (10-Q / 10-K / 8-K), materiality-filtered | Not started |
+| 3 | Deep-dive research reports with a letter grade | Not started |
+| 4 | Formatting, source links, filter tuning | Not started |
+
+## Setup
+
+### 1. Secrets
+
+Add these under **Settings → Secrets and variables → Actions**:
+
+| Secret | Where it comes from |
+|---|---|
+| `FINNHUB_API_KEY` | Free key from <https://finnhub.io/register> |
+| `GMAIL_ADDRESS` | The Gmail account that sends the digest |
+| `GMAIL_APP_PASSWORD` | 16-character app password from <https://myaccount.google.com/apppasswords> (requires 2-Step Verification) |
+
+Google revokes all app passwords whenever the account password changes. If the
+digest silently stops arriving, check that first.
+
+Recipient defaults to `christian.na@icloud.com`. Override with a repository
+variable named `DIGEST_RECIPIENT`.
+
+### 2. Local runs
+
+```bash
+pip install -r requirements.txt
+cp .env.example .env      # fill in real values; .env is gitignored
+set -a && . ./.env && set +a
+
+python -m watchlist_agent.digest --force --dry-run   # print, do not send
+python -m watchlist_agent.digest --force             # actually send
+```
+
+`--force` bypasses the time-window gate; `--dry-run` prints the digest instead
+of emailing it.
+
+## The watchlist
+
+`watchlist.json` holds tickers and nothing else:
+
+```json
+{
+  "move_threshold_pct": 3.0,
+  "tickers": ["AAPL", "ABNB", "..."]
+}
+```
+
+Edit it directly, or ask Claude Code (`add NVDA`, `drop ROKU`).
+
+Symbols ending in `-USD` (`BTC-USD`, `ETH-USD`, `XRP-USD`) are treated as
+Coinbase product IDs and priced from Coinbase's free public candles API, because
+Finnhub's free tier `/quote` endpoint covers equities only. Everything else goes
+to Finnhub.
+
+Any ticker that cannot be priced is reported in a **Could not price** section of
+the digest rather than failing the run — that is the feedback loop for finding
+delisted, renamed, or uncovered symbols.
+
+## Scheduling and daylight saving
+
+The digest targets **4:30pm ET every weekday**, just after the US close.
+
+GitHub Actions cron is UTC-only with no DST awareness, so the workflow registers
+both offsets:
+
+- `30 20 * * 1-5` → 4:30pm EDT (March–November)
+- `30 21 * * 1-5` → 4:30pm EST (November–March)
+
+Both fire year round, so `watchlist_agent.config.should_run_now()` re-checks the
+actual `America/New_York` time and exits early unless it lands in the
+`[16:30, 17:30)` ET window. The two cron entries are exactly 60 minutes apart in
+ET terms, so precisely one clears the gate in either season — no drift, no
+double sends, and up to an hour of tolerance for Actions scheduling delay.
+
+## Layout
+
+```
+watchlist.json                     tickers + move threshold
+watchlist_agent/
+  config.py                        env/secrets, ET scheduling gate
+  watchlist.py                     load/mutate watchlist.json
+  prices.py                        Finnhub quotes, Coinbase crypto, rate limiting
+  email_report.py                  text + HTML rendering, Gmail SMTP
+  digest.py                        entry point
+.github/workflows/daily-digest.yml schedule + manual dispatch
+```
+
+## Disclaimer
+
+Everything this repo produces is a synthesis of public information for research
+purposes, not financial advice.

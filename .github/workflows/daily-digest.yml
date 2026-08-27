@@ -1,0 +1,53 @@
+name: Daily watchlist digest
+
+on:
+  schedule:
+    # Target is 4:30pm ET every weekday, year round. GitHub cron is UTC-only and
+    # has no DST awareness, so both offsets are registered:
+    #   20:30 UTC = 4:30pm EDT (Mar-Nov)
+    #   21:30 UTC = 4:30pm EST (Nov-Mar)
+    # Exactly one lands at 4:30pm ET on any given day; the digest job re-checks
+    # the real ET time and the off-season entry exits without sending.
+    - cron: "30 20 * * 1-5"
+    - cron: "30 21 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Run even outside the 4:30pm ET send window"
+        type: boolean
+        default: true
+      dry_run:
+        description: "Print the digest to the job log instead of emailing it"
+        type: boolean
+        default: false
+
+concurrency:
+  group: daily-digest
+  cancel-in-progress: false
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Send digest
+        env:
+          FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
+          GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          DIGEST_RECIPIENT: ${{ vars.DIGEST_RECIPIENT || 'christian.na@icloud.com' }}
+        run: |
+          python -m watchlist_agent.digest \
+            ${{ (inputs.force || github.event_name == 'workflow_dispatch') && '--force' || '' }} \
+            ${{ inputs.dry_run && '--dry-run' || '' }}
