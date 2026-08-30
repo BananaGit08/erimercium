@@ -114,6 +114,44 @@ def company_keyword(name: str) -> str:
     return ""
 
 
+SUBJECT_WINDOW_WORDS = 4
+
+
+def mention_position(headline: str, ticker: str, company_name: str = "") -> int | None:
+    """Where the company is first named in a headline, or None if absent."""
+    if not headline:
+        return None
+    positions = []
+    if len(ticker) >= 3:
+        match = re.search(rf"\b{re.escape(ticker)}\b", headline)
+        if match:
+            positions.append(match.start())
+    keyword = company_keyword(company_name)
+    if keyword:
+        index = headline.lower().find(keyword)
+        if index >= 0:
+            positions.append(index)
+    return min(positions) if positions else None
+
+
+def is_subject(headline: str, ticker: str, company_name: str = "") -> bool:
+    """Whether the company looks like the subject rather than a bystander.
+
+    Headlines lead with their subject, so a company named in the opening
+    words is usually what the story is about, while one named later is
+    typically a participant in someone else's story -- "NVIDIA CFO Says Co &
+    Amazon Web Services To Deploy..." is Nvidia news that mentions Amazon.
+    Both are kept, but bystander mentions are scored down so genuine subject
+    stories outrank them when only a few bullets fit.
+
+    This counts opening words rather than characters. Word position follows
+    from how headlines are written; a character cutoff would just be a
+    constant fitted to whichever examples happened to be at hand.
+    """
+    opening = " ".join((headline or "").split()[:SUBJECT_WINDOW_WORDS])
+    return mention_position(opening, ticker, company_name) is not None
+
+
 def is_about_company(headline: str, ticker: str, company_name: str = "") -> bool:
     """Whether a headline is actually about this company.
 
@@ -124,17 +162,10 @@ def is_about_company(headline: str, ticker: str, company_name: str = "") -> bool
     QFIN earnings miss to IREN. Requiring the company to appear in the headline
     is what makes the materiality score mean anything.
     """
-    if not headline:
-        return False
-
     # Ticker match is case-sensitive and length-limited on purpose: short
     # symbols like F, Q, ON, BE and GE are ordinary English words, and a
     # case-insensitive match on them would accept nearly every headline.
-    if len(ticker) >= 3 and re.search(rf"\b{re.escape(ticker)}\b", headline):
-        return True
-
-    keyword = company_keyword(company_name)
-    return bool(keyword) and keyword in headline.lower()
+    return mention_position(headline, ticker, company_name) is not None
 
 
 @dataclass

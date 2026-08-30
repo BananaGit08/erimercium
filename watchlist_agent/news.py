@@ -13,7 +13,7 @@ from .config import (
     NEWS_LOOKBACK_DAYS,
     finnhub_api_key,
 )
-from .materiality import Bullet, is_about_company, is_noise, score_headline
+from .materiality import Bullet, is_about_company, is_noise, is_subject, score_headline
 
 log = logging.getLogger(__name__)
 
@@ -64,6 +64,10 @@ def fetch_news(
         score = score_headline(headline)
         if score <= 0:
             continue
+        if not is_subject(headline, ticker, company):
+            # Named as a participant in someone else's story. Keep it, but let
+            # anything the company actually did outrank it.
+            score = max(1, score // 3)
         seen.add(key)
         source = (article.get("source") or "").strip()
         text = f"{headline} ({source})" if source else headline

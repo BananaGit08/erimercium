@@ -189,13 +189,26 @@ a query term, so it cannot enumerate a company's recent filings. The
 submissions feed lists form types and 8-K item codes directly.
 
 **News is keyword-filtered**, and this is the part weakened by running without
-an LLM. A headline is dropped if it matches a never-material *format*
-(listicles, "here's why the stock is moving", market wraps, Cramer), and kept
-only if it scores on a material subject (M&A, guidance, executive changes,
-investigations, approvals, breaches). The filter judges shape and vocabulary,
-not substance, so it will pass some noise and drop some real stories that are
-worded unusually. Bullets are the headline itself with a source link, not a
-synthesised takeaway — writing "the major takeaway" needs a model.
+an LLM. A headline passes three checks:
+
+1. **Format** — dropped if it matches a never-material shape (listicles,
+   "here's why the stock is moving", market wraps, Cramer).
+2. **Attribution** — dropped unless it actually names the company, by ticker or
+   by the distinctive part of its registered name. Finnhub's feed returns
+   anything *mentioning* a symbol, including wire roundups covering a dozen
+   tickers; the first live run filed a Rivian CFO resignation under AMZN and a
+   QFIN earnings miss under IREN. Ticker matching is case-sensitive and needs
+   three characters, since `F`, `Q`, `ON`, `BE` and `GE` are ordinary words.
+3. **Subject** — kept either way, but demoted if the company is not named in
+   the opening words. Headlines lead with their subject, so "NVIDIA CFO Says Co
+   & Amazon Web Services To Deploy..." is Nvidia news that mentions Amazon.
+   Demoting rather than dropping means a bystander mention still surfaces when
+   nothing better exists.
+
+The filter judges shape, vocabulary and position — not substance — so it will
+pass some noise and miss some unusually worded stories. Bullets are the
+headline itself with a source link, not a synthesised takeaway; writing "the
+major takeaway" needs a model reading the article.
 
 Tickers with no US filings (foreign private issuers like `ASML` and `BABA`,
 ETFs like `FBTC`, OTC symbols like `HYMLF`) simply have no CIK in EDGAR and are
