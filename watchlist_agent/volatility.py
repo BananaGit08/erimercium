@@ -76,9 +76,23 @@ def _yahoo_closes(ticker: str) -> list[float] | None:
         return None
     try:
         result = resp.json()["chart"]["result"][0]
-        raw = result["indicators"]["quote"][0]["close"]
     except (ValueError, KeyError, IndexError, TypeError):
         log.debug("yahoo payload unusable for %s", ticker)
+        return None
+
+    # Adjusted closes, always: the raw close series is not split-adjusted, so a
+    # split shows up as a ~50% one-day "return" and wrecks the standard
+    # deviation. MRNA came back at 23.6% daily sigma before this.
+    raw = None
+    try:
+        raw = result["indicators"]["adjclose"][0]["adjclose"]
+    except (KeyError, IndexError, TypeError):
+        log.debug("no adjclose for %s; falling back to close", ticker)
+        try:
+            raw = result["indicators"]["quote"][0]["close"]
+        except (KeyError, IndexError, TypeError):
+            return None
+    if not raw:
         return None
 
     # Yahoo emits null for halted or untraded sessions.
