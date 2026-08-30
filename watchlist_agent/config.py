@@ -70,6 +70,16 @@ NEWS_LOOKBACK_DAYS = 7
 FILINGS_LOOKBACK_DAYS = 10
 MAX_BULLETS_PER_TICKER = 4
 
+# Deep-dive research scheduling.
+# Reports go out this many days before a company reports earnings -- far enough
+# ahead to act on, close enough that the analyst estimates are settled.
+EARNINGS_LEAD_DAYS = 7
+# How far ahead to pull the earnings calendar. Wider than the lead time so a
+# date that moves closer is still seen before it passes.
+EARNINGS_LOOKAHEAD_DAYS = 30
+# Quarters of fundamentals to trend in a report.
+FUNDAMENTALS_QUARTERS = 6
+
 # Finnhub's free tier allows 60 requests/minute. Stay comfortably under it.
 FINNHUB_MAX_RPM = 55
 
