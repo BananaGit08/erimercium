@@ -6,20 +6,16 @@ Every secret is read from the environment. Nothing sensitive is ever committed.
 from __future__ import annotations
 
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 ET = ZoneInfo("America/New_York")
 
-# The digest is scheduled for 4:30pm ET, just after the US market close.
-TARGET_ET_HOUR = 16
-TARGET_ET_MINUTE = 30
-
-# GitHub Actions cron can fire late. Accept a run that starts anywhere in the
-# hour following the target, which tolerates delay without ever letting the
-# "wrong" DST cron entry through (the two entries are exactly 60 minutes apart
-# in ET terms, and only one of them can land inside this window).
-RUN_WINDOW_MINUTES = 60
+# The digest targets 4:30pm ET, just after the US close. GitHub cron is UTC-only
+# and DST-unaware, so the workflow registers both offsets and exactly one is
+# correct on any given day.
+EDT_CRON = "30 20 * * 1-5"  # 20:30 UTC == 4:30pm EDT (March-November)
+EST_CRON = "30 21 * * 1-5"  # 21:30 UTC == 4:30pm EST (November-March)
 
 DEFAULT_MOVE_THRESHOLD_PCT = 3.0
 
@@ -75,19 +71,38 @@ def now_et() -> datetime:
     return datetime.now(ET)
 
 
-def should_run_now(now: datetime | None = None) -> tuple[bool, str]:
-    """Return whether the current ET time falls inside the send window.
+def expected_cron(now: datetime | None = None) -> str:
+    """Which of the two cron entries is the correct one for today's ET offset."""
+    now = now or now_et()
+    return EDT_CRON if now.utcoffset() == timedelta(hours=-4) else EST_CRON
 
-    The workflow registers two cron entries -- one correct under EST, one under
-    EDT -- so that exactly one of them lands at 4:30pm ET year round. This gate
-    discards the other.
+
+def _normalize_cron(cron: str) -> str:
+    return " ".join(cron.split())
+
+
+def should_run_for_schedule(
+    cron: str, now: datetime | None = None
+) -> tuple[bool, str]:
+    """Decide whether a scheduled run should send the digest.
+
+    This keys off *which cron entry fired*, not the wall-clock time the runner
+    happened to start. GitHub routinely delays scheduled workflows -- observed
+    delays of 80+ minutes on this repo -- so any wall-clock window is a coin
+    flip on whether the digest goes out at all. The triggering cron expression
+    is delay-proof: the off-season entry is discarded no matter how late either
+    one actually starts, and the in-season entry always sends.
     """
     now = now or now_et()
-    minutes_now = now.hour * 60 + now.minute
-    target = TARGET_ET_HOUR * 60 + TARGET_ET_MINUTE
-    if target <= minutes_now < target + RUN_WINDOW_MINUTES:
-        return True, f"{now:%Y-%m-%d %H:%M %Z} is inside the 4:30pm ET send window"
+    fired = _normalize_cron(cron)
+    wanted = _normalize_cron(expected_cron(now))
+    season = "EDT" if now.utcoffset() == timedelta(hours=-4) else "EST"
+    if fired == wanted:
+        return True, (
+            f"cron {fired!r} is the {season} entry for {now:%Y-%m-%d}; sending "
+            f"(runner started {now:%H:%M %Z})"
+        )
     return False, (
-        f"{now:%Y-%m-%d %H:%M %Z} is outside the 4:30pm ET send window "
-        "(this is the off-season DST cron entry; skipping)"
+        f"cron {fired!r} is the off-season entry ({season} is in effect, which "
+        f"uses {wanted!r}); skipping"
     )

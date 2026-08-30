@@ -79,11 +79,17 @@ both offsets:
 - `30 20 * * 1-5` → 4:30pm EDT (March–November)
 - `30 21 * * 1-5` → 4:30pm EST (November–March)
 
-Both fire year round, so `watchlist_agent.config.should_run_now()` re-checks the
-actual `America/New_York` time and exits early unless it lands in the
-`[16:30, 17:30)` ET window. The two cron entries are exactly 60 minutes apart in
-ET terms, so precisely one clears the gate in either season — no drift, no
-double sends, and up to an hour of tolerance for Actions scheduling delay.
+Both fire year round, so the job discards the off-season one. It does that by
+comparing **which cron expression triggered the run** (`github.event.schedule`)
+against the current `America/New_York` UTC offset — not by checking the clock
+when the runner starts.
+
+That distinction is load-bearing. GitHub delays scheduled workflows on shared
+runners, and this repo has already seen an 81-minute delay: on 2026-08-28 both
+entries were queued for 20:30 and 21:30 UTC and both actually started at 21:51
+UTC. A wall-clock window would have thrown away the correct run and sent
+nothing that day. Keying off the triggering cron means the in-season entry
+sends however late it starts, and the off-season entry never does.
 
 ## Layout
 

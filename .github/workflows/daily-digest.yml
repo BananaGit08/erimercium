@@ -6,8 +6,11 @@ on:
     # has no DST awareness, so both offsets are registered:
     #   20:30 UTC = 4:30pm EDT (Mar-Nov)
     #   21:30 UTC = 4:30pm EST (Nov-Mar)
-    # Exactly one lands at 4:30pm ET on any given day; the digest job re-checks
-    # the real ET time and the off-season entry exits without sending.
+    # Both fire year round. The job checks which cron triggered it against the
+    # current ET offset, so the off-season entry exits without sending. Keying
+    # off the cron rather than the clock matters: GitHub delays scheduled runs
+    # (80+ minutes observed here), which would push a correct run outside any
+    # wall-clock window and silently skip the digest.
     - cron: "30 20 * * 1-5"
     - cron: "30 21 * * 1-5"
   workflow_dispatch:
@@ -47,7 +50,17 @@ jobs:
           GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           DIGEST_RECIPIENT: ${{ vars.DIGEST_RECIPIENT || 'christian.na@icloud.com' }}
+          # Empty for workflow_dispatch; the cron string for scheduled runs.
+          TRIGGER_SCHEDULE: ${{ github.event.schedule }}
+          DRY_RUN: ${{ inputs.dry_run }}
         run: |
-          python -m watchlist_agent.digest \
-            ${{ (inputs.force || github.event_name == 'workflow_dispatch') && '--force' || '' }} \
-            ${{ inputs.dry_run && '--dry-run' || '' }}
+          args=()
+          if [ -n "$TRIGGER_SCHEDULE" ]; then
+            args+=(--schedule "$TRIGGER_SCHEDULE")
+          else
+            args+=(--force)
+          fi
+          if [ "$DRY_RUN" = "true" ]; then
+            args+=(--dry-run)
+          fi
+          python -m watchlist_agent.digest "${args[@]}"
