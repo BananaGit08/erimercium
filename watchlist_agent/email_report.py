@@ -46,6 +46,7 @@ def render_text(
     watched_count: int,
     failures: list[QuoteFailure],
     when: datetime,
+    warning: str | None = None,
 ) -> str:
     lines = [
         f"WATCHLIST DIGEST — {when:%A, %B %d, %Y} (as of {when:%-I:%M %p %Z})",
@@ -56,6 +57,8 @@ def render_text(
         "=" * 68,
         "",
     ]
+    if warning:
+        lines += [f"  ⚠ {warning}", ""]
 
     if shown:
         for m in shown:
@@ -106,6 +109,7 @@ def render_html(
     watched_count: int,
     failures: list[QuoteFailure],
     when: datetime,
+    warning: str | None = None,
 ) -> str:
     up, down, muted = "#0f7b3f", "#b3261e", "#6b7280"
 
@@ -157,6 +161,14 @@ def render_html(
         f'<p style="margin:0;color:{muted};font-size:14px;font-style:italic;">{{}}</p>'
     )
 
+    warning_block = ""
+    if warning:
+        warning_block = (
+            '<p style="margin:24px 0 0;padding:11px 13px;border-radius:6px;'
+            'background:#fef6e7;border:1px solid #f5d9a3;color:#7a4f01;'
+            f'font-size:13px;line-height:1.5;">&#9888; {escape(warning)}</p>'
+        )
+
     failures_block = ""
     if failures:
         items = "".join(
@@ -180,6 +192,7 @@ def render_html(
     {watched_count} tickers watched &middot; flagging moves unusual for each ticker
   </p>
 
+  {warning_block}
   {section("Unusual moves", movers_block)}
   {section("News &amp; filings", placeholder.format(
       "Stage 2 will list material news headlines and new 10-Q / 10-K / 8-K "

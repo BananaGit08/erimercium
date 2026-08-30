@@ -6,15 +6,17 @@ Tuesday. So each ticker gets its own bar, derived from how much it normally
 moves day to day.
 
 Finnhub's free tier does not include historical candles (/stock/candle returns
-403), so daily closes come from Stooq for equities and Coinbase for crypto.
-Both are free and keyless. Any ticker whose history cannot be fetched falls
-back to the flat threshold rather than being dropped.
+403), so daily closes come from Yahoo's chart API for equities and Coinbase for
+crypto. Both are free and keyless. Any ticker whose history cannot be fetched
+falls back to the flat threshold rather than being dropped.
+
+Stooq was tried first and rejected: it answers a plain client with 404 and a
+browser user-agent with a JavaScript bot-check page, so it returns no usable
+data from a datacenter IP however it is called.
 """
 
 from __future__ import annotations
 
-import csv
-import io
 import logging
 import statistics
 import threading
@@ -24,11 +26,13 @@ import requests
 
 from .config import (
     COINBASE_BASE,
+    VOLATILITY_MIN_COVERAGE,
     HTTP_TIMEOUT_SECONDS,
-    STOOQ_BASE,
     VOLATILITY_LOOKBACK_DAYS,
     VOLATILITY_MAX_WORKERS,
     VOLATILITY_MIN_OBSERVATIONS,
+    YAHOO_BASE,
+    YAHOO_USER_AGENT,
 )
 from .watchlist import is_crypto
 
@@ -42,7 +46,7 @@ def _session() -> requests.Session:
     session = getattr(_local, "session", None)
     if session is None:
         session = requests.Session()
-        session.headers["User-Agent"] = "erimercium-watchlist-agent"
+        session.headers["User-Agent"] = YAHOO_USER_AGENT
         _local.session = session
     return session
 
@@ -56,29 +60,29 @@ def _daily_returns_pct(closes: list[float]) -> list[float]:
     return returns
 
 
-def _stooq_closes(ticker: str) -> list[float] | None:
-    """Daily closes from Stooq, oldest first. US equities use the .us suffix."""
-    symbol = f"{ticker.lower()}.us"
+def _yahoo_closes(ticker: str) -> list[float] | None:
+    """Daily closes from Yahoo's chart API, oldest first."""
     try:
         resp = _session().get(
-            f"{STOOQ_BASE}/q/d/l/",
-            params={"s": symbol, "i": "d"},
+            f"{YAHOO_BASE}/v8/finance/chart/{ticker}",
+            params={"range": "6mo", "interval": "1d"},
             timeout=HTTP_TIMEOUT_SECONDS,
         )
     except requests.RequestException as exc:
-        log.debug("stooq request failed for %s: %s", ticker, exc)
+        log.debug("yahoo request failed for %s: %s", ticker, exc)
         return None
-    if not resp.ok or not resp.text.lstrip().startswith("Date"):
-        # Stooq answers unknown symbols with a short non-CSV body.
-        log.debug("stooq has no history for %s", ticker)
+    if not resp.ok:
+        log.debug("yahoo returned HTTP %s for %s", resp.status_code, ticker)
+        return None
+    try:
+        result = resp.json()["chart"]["result"][0]
+        raw = result["indicators"]["quote"][0]["close"]
+    except (ValueError, KeyError, IndexError, TypeError):
+        log.debug("yahoo payload unusable for %s", ticker)
         return None
 
-    closes = []
-    for row in csv.DictReader(io.StringIO(resp.text)):
-        try:
-            closes.append(float(row["Close"]))
-        except (KeyError, TypeError, ValueError):
-            continue  # Stooq writes "N/D" for missing sessions.
+    # Yahoo emits null for halted or untraded sessions.
+    closes = [float(c) for c in raw if c is not None]
     return closes or None
 
 
@@ -112,7 +116,7 @@ def _coinbase_closes(ticker: str) -> list[float] | None:
 
 
 def _sigma_for(ticker: str) -> tuple[str, float | None]:
-    closes = _coinbase_closes(ticker) if is_crypto(ticker) else _stooq_closes(ticker)
+    closes = _coinbase_closes(ticker) if is_crypto(ticker) else _yahoo_closes(ticker)
     if not closes:
         return ticker, None
 
@@ -147,4 +151,33 @@ def fetch_sigmas(tickers: list[str]) -> dict[str, float]:
         len(tickers),
         f" (no history: {', '.join(missing)})" if missing else "",
     )
+
+    coverage = len(sigmas) / len(tickers) if tickers else 1.0
+    if coverage < VOLATILITY_MIN_COVERAGE:
+        # A source going dark degrades every ticker to the flat fallback, which
+        # looks exactly like a normal run unless it is called out. It has
+        # happened once already, so say so rather than quietly carrying on.
+        log.warning(
+            "VOLATILITY COVERAGE %.0f%% (%d/%d) -- the per-ticker rule has "
+            "degraded to the flat fallback for most tickers; the history "
+            "source is probably failing",
+            coverage * 100,
+            len(sigmas),
+            len(tickers),
+        )
     return sigmas
+
+
+def coverage_warning(sigmas: dict[str, float], tickers: list[str]) -> str | None:
+    """A note for the digest when volatility coverage is too low to trust."""
+    if not tickers:
+        return None
+    coverage = len(sigmas) / len(tickers)
+    if coverage >= VOLATILITY_MIN_COVERAGE:
+        return None
+    return (
+        f"Volatility history was only available for {len(sigmas)} of "
+        f"{len(tickers)} tickers, so most moves below were flagged against the "
+        "flat fallback bar rather than each ticker's own range. The price "
+        "history source is likely failing."
+    )

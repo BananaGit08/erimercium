@@ -39,7 +39,15 @@ class Thresholds:
 
 FINNHUB_BASE = "https://finnhub.io/api/v1"
 COINBASE_BASE = "https://api.exchange.coinbase.com"
-STOOQ_BASE = "https://stooq.com"
+YAHOO_BASE = "https://query1.finance.yahoo.com"
+
+# Yahoo serves JSON to plain HTTP clients; Stooq answers datacenter IPs with a
+# JavaScript bot-check page regardless of headers, so it cannot be used here.
+YAHOO_USER_AGENT = "Mozilla/5.0 (compatible; erimercium-watchlist-agent/1.0)"
+
+# If most tickers come back without history the per-ticker rule has silently
+# degraded to the flat fallback, which is worth saying out loud.
+VOLATILITY_MIN_COVERAGE = 0.5
 
 # Volatility window. ~60 trading days is about three months: long enough to be
 # stable, short enough to track a name whose character has changed.

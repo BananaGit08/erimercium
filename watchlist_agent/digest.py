@@ -10,7 +10,7 @@ from .config import ConfigError, now_et, should_run_for_schedule
 from .email_report import render_html, render_text, send_email, subject_line
 from .movers import select_movers, split_for_email
 from .prices import fetch_quotes
-from .volatility import fetch_sigmas
+from .volatility import coverage_warning, fetch_sigmas
 from .watchlist import Watchlist
 
 log = logging.getLogger("watchlist_agent")
@@ -25,7 +25,9 @@ def build_digest(dry_run: bool = False) -> int:
     quotes, failures = fetch_quotes(tickers)
     log.info("priced %d/%d tickers", len(quotes), len(tickers))
 
-    sigmas = fetch_sigmas([q.ticker for q in quotes])
+    priced = [q.ticker for q in quotes]
+    sigmas = fetch_sigmas(priced)
+    warning = coverage_warning(sigmas, priced)
     movers = select_movers(quotes, sigmas, thresholds)
     shown, overflow = split_for_email(movers, thresholds.max_shown)
     when = now_et()
@@ -35,8 +37,8 @@ def build_digest(dry_run: bool = False) -> int:
         log.info("  %s %+.2f%% — %s", m.ticker, m.change_pct, m.reason)
 
     subject = subject_line(shown, when)
-    text_body = render_text(shown, overflow, len(tickers), failures, when)
-    html_body = render_html(shown, overflow, len(tickers), failures, when)
+    text_body = render_text(shown, overflow, len(tickers), failures, when, warning)
+    html_body = render_html(shown, overflow, len(tickers), failures, when, warning)
 
     if dry_run:
         print(text_body)

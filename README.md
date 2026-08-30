@@ -106,9 +106,20 @@ Worked against real closes from 2026-08-28:
 | RGTI | −5.17% | ~6.0% | quiet — under 1σ, entirely normal |
 
 Finnhub's free tier does not serve historical candles (`/stock/candle` returns
-403), so daily closes come from [Stooq](https://stooq.com) for equities and
-Coinbase for crypto. Both are free and keyless. A ticker whose history cannot be
-fetched falls back to `fallback_pct` rather than being dropped.
+403), so daily closes come from Yahoo's chart API for equities and Coinbase for
+crypto. Both are free and keyless. A ticker whose history cannot be fetched
+falls back to `fallback_pct` rather than being dropped.
+
+Stooq was tried first and does not work from CI: it answers a plain HTTP client
+with 404, and a browser user-agent with a JavaScript bot-check page. When it
+failed for all 99 tickers the run still went green and the digest quietly
+reverted to the flat threshold — so when volatility coverage drops below 50%,
+the digest now carries a visible warning and the job logs a `WARNING`. A data
+source going dark should not look like an ordinary day.
+
+`tools/probe_history.py` (run via the **Probe history sources** workflow) checks
+which sources are reachable from a runner; the development sandbox has no
+outbound network, so source reachability can only be tested from CI.
 
 ## Scheduling and daylight saving
 
