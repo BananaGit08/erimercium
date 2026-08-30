@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 import requests
 
 from .config import MAX_BULLETS_PER_TICKER
-from .filings import fetch_filings, sec_session
+from .filings import company_name, fetch_filings, sec_session
 from .materiality import Bullet
 from .news import fetch_news
 from .watchlist import is_crypto
@@ -24,7 +24,10 @@ def _for_ticker(ticker: str) -> tuple[str, list[Bullet]]:
     bullets: list[Bullet] = []
     with requests.Session() as finnhub, sec_session() as sec:
         finnhub.headers["User-Agent"] = "erimercium-watchlist-agent"
-        bullets.extend(fetch_news(finnhub, ticker))
+        # The SEC ticker map supplies the registered company name, which is
+        # what lets news be checked against the company rather than the symbol.
+        company = company_name(sec, ticker)
+        bullets.extend(fetch_news(finnhub, ticker, company))
         bullets.extend(fetch_filings(sec, ticker))
 
     bullets.sort(key=lambda b: b.sort_key, reverse=True)

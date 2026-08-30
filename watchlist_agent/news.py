@@ -13,12 +13,14 @@ from .config import (
     NEWS_LOOKBACK_DAYS,
     finnhub_api_key,
 )
-from .materiality import Bullet, is_noise, score_headline
+from .materiality import Bullet, is_about_company, is_noise, score_headline
 
 log = logging.getLogger(__name__)
 
 
-def fetch_news(session: requests.Session, ticker: str) -> list[Bullet]:
+def fetch_news(
+    session: requests.Session, ticker: str, company: str = ""
+) -> list[Bullet]:
     """Recent company news for one ticker, noise removed and scored."""
     today = date.today()
     try:
@@ -51,6 +53,10 @@ def fetch_news(session: requests.Session, ticker: str) -> list[Bullet]:
         headline = (article.get("headline") or "").strip()
         if not headline or is_noise(headline):
             continue
+        if not is_about_company(headline, ticker, company):
+            # Mentions the symbol but is about someone else -- a wire roundup
+            # or macro piece. These score highly and are entirely misleading.
+            continue
         # Wire stories are syndicated verbatim across outlets; keep the first.
         key = headline.lower()[:70]
         if key in seen:
@@ -65,5 +71,7 @@ def fetch_news(session: requests.Session, ticker: str) -> list[Bullet]:
             Bullet(text=text, url=article.get("url") or "", score=score, kind="news")
         )
 
-    log.info("%s: %d material headlines from %d articles", ticker, len(bullets), len(articles))
+    log.info(
+        "%s: %d material headlines from %d articles", ticker, len(bullets), len(articles)
+    )
     return bullets

@@ -31,7 +31,7 @@ from .materiality import Bullet, describe_filing
 log = logging.getLogger(__name__)
 
 _cik_lock = threading.Lock()
-_cik_cache: dict[str, str] | None = None
+_cik_cache: dict[str, tuple[str, str]] | None = None
 _last_request = 0.0
 
 
@@ -54,13 +54,13 @@ def sec_session() -> requests.Session:
     return session
 
 
-def _load_cik_map(session: requests.Session) -> dict[str, str]:
-    """Ticker -> zero-padded CIK, fetched once per run."""
+def _load_cik_map(session: requests.Session) -> dict[str, tuple[str, str]]:
+    """Ticker -> (zero-padded CIK, company name), fetched once per run."""
     global _cik_cache
     with _cik_lock:
         if _cik_cache is not None:
             return _cik_cache
-        mapping: dict[str, str] = {}
+        mapping: dict[str, tuple[str, str]] = {}
         try:
             _throttle()
             resp = session.get(SEC_TICKERS_URL, timeout=HTTP_TIMEOUT_SECONDS)
@@ -68,7 +68,10 @@ def _load_cik_map(session: requests.Session) -> dict[str, str]:
                 for row in resp.json().values():
                     ticker = str(row.get("ticker", "")).upper()
                     if ticker:
-                        mapping[ticker] = str(row["cik_str"]).zfill(10)
+                        mapping[ticker] = (
+                            str(row["cik_str"]).zfill(10),
+                            str(row.get("title", "")),
+                        )
         except (requests.RequestException, ValueError, KeyError, AttributeError) as exc:
             log.warning("could not load SEC ticker map: %s", exc)
         _cik_cache = mapping
@@ -78,11 +81,12 @@ def _load_cik_map(session: requests.Session) -> dict[str, str]:
 
 def fetch_filings(session: requests.Session, ticker: str) -> list[Bullet]:
     """Material 10-K / 10-Q / 8-K filings for one ticker in the lookback window."""
-    cik = _load_cik_map(session).get(ticker.upper())
-    if not cik:
+    entry = _load_cik_map(session).get(ticker.upper())
+    if not entry:
         # Foreign private issuers, ETFs and OTC symbols are frequently absent.
         log.info("%s: no CIK in EDGAR (foreign issuer, ETF or OTC)", ticker)
         return []
+    cik, _ = entry
 
     try:
         _throttle()
@@ -140,3 +144,9 @@ def fetch_filings(session: requests.Session, ticker: str) -> list[Bullet]:
     if bullets:
         log.info("%s: %d material filings", ticker, len(bullets))
     return bullets
+
+
+def company_name(session: requests.Session, ticker: str) -> str:
+    """Registered company name for a ticker, or empty if EDGAR does not list it."""
+    entry = _load_cik_map(session).get(ticker.upper())
+    return entry[1] if entry else ""

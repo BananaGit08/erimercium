@@ -94,6 +94,48 @@ FORM_DESCRIPTIONS = {
 
 _noise_re = re.compile("|".join(NOISE_PATTERNS), re.IGNORECASE)
 
+# Words that do not distinguish one company from another.
+_NAME_SUFFIXES = {
+    "inc", "inc.", "corp", "corp.", "corporation", "co", "co.", "company",
+    "ltd", "ltd.", "limited", "plc", "holdings", "holding", "group",
+    "technologies", "technology", "tech", "international", "industries",
+    "systems", "solutions", "enterprises", "partners", "the", "n.v.", "s.a.",
+    "ag", "nv", "sa", "class", "common", "stock", "shares", "&",
+}
+
+
+def company_keyword(name: str) -> str:
+    """The distinctive part of a company name, for matching against headlines."""
+    for token in (name or "").replace(",", " ").split():
+        cleaned = token.strip().lower()
+        if cleaned and cleaned not in _NAME_SUFFIXES and len(cleaned) >= 3:
+            # "Amazon.com" -> "amazon"; keep the leading segment only.
+            return cleaned.split(".")[0]
+    return ""
+
+
+def is_about_company(headline: str, ticker: str, company_name: str = "") -> bool:
+    """Whether a headline is actually about this company.
+
+    Finnhub's company-news feed returns anything that *mentions* the symbol,
+    which includes wire roundups covering a dozen tickers and macro commentary.
+    Those score highly on materiality keywords while being about someone else
+    entirely -- a real run attributed a Rivian CFO resignation to AMZN and a
+    QFIN earnings miss to IREN. Requiring the company to appear in the headline
+    is what makes the materiality score mean anything.
+    """
+    if not headline:
+        return False
+
+    # Ticker match is case-sensitive and length-limited on purpose: short
+    # symbols like F, Q, ON, BE and GE are ordinary English words, and a
+    # case-insensitive match on them would accept nearly every headline.
+    if len(ticker) >= 3 and re.search(rf"\b{re.escape(ticker)}\b", headline):
+        return True
+
+    keyword = company_keyword(company_name)
+    return bool(keyword) and keyword in headline.lower()
+
 
 @dataclass
 class Bullet:
