@@ -152,9 +152,3 @@ def fetch_quotes(tickers: list[str]) -> tuple[list[Quote], list[QuoteFailure]]:
                 log.info("could not price %s: %s", result.ticker, result.reason)
 
     return quotes, failures
-
-
-def significant_movers(quotes: list[Quote], threshold_pct: float) -> list[Quote]:
-    """Quotes that moved more than threshold_pct in either direction, biggest first."""
-    movers = [q for q in quotes if abs(q.change_pct) > threshold_pct]
-    return sorted(movers, key=lambda q: abs(q.change_pct), reverse=True)

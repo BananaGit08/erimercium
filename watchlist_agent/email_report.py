@@ -9,7 +9,8 @@ from email.message import EmailMessage
 from html import escape
 
 from .config import gmail_address, gmail_app_password, recipient_address
-from .prices import Quote, QuoteFailure
+from .movers import Mover
+from .prices import QuoteFailure
 
 log = logging.getLogger(__name__)
 
@@ -26,7 +27,7 @@ def _arrow(pct: float) -> str:
     return "▲" if pct >= 0 else "▼"
 
 
-def subject_line(movers: list[Quote], when: datetime) -> str:
+def subject_line(movers: list[Mover], when: datetime) -> str:
     date = f"{when:%b %d}"
     if not movers:
         return f"Watchlist digest — {date} — no significant moves"
@@ -40,96 +41,115 @@ def subject_line(movers: list[Quote], when: datetime) -> str:
 
 
 def render_text(
-    movers: list[Quote],
-    threshold_pct: float,
+    shown: list[Mover],
+    overflow: list[Mover],
     watched_count: int,
     failures: list[QuoteFailure],
     when: datetime,
 ) -> str:
     lines = [
         f"WATCHLIST DIGEST — {when:%A, %B %d, %Y} (as of {when:%-I:%M %p %Z})",
-        f"{watched_count} tickers watched — flagging moves over {threshold_pct:g}%",
+        f"{watched_count} tickers watched — flagging moves unusual for each ticker",
         "",
-        "=" * 60,
-        f"MOVERS (>{threshold_pct:g}%)",
-        "=" * 60,
+        "=" * 68,
+        "UNUSUAL MOVES",
+        "=" * 68,
         "",
     ]
 
-    if movers:
-        for q in movers:
+    if shown:
+        for m in shown:
             lines.append(
-                f"  {_arrow(q.change_pct)} {q.ticker:<10} {q.change_pct:+7.2f}%   "
-                f"${q.previous_close:,.2f} -> ${q.current:,.2f}"
+                f"  {_arrow(m.change_pct)} {m.ticker:<10} {m.change_pct:+7.2f}%   "
+                f"${m.quote.previous_close:,.2f} -> ${m.quote.current:,.2f}"
             )
+            lines.append(f"      {m.reason}")
+        if overflow:
+            lines += [
+                "",
+                f"  + {len(overflow)} more flagged: "
+                + ", ".join(f"{m.ticker} {m.change_pct:+.1f}%" for m in overflow),
+            ]
     else:
-        lines.append(f"  No watchlist stock moved more than {threshold_pct:g}% today.")
+        lines.append("  Nothing moved unusually for its own range today.")
 
     lines += [
         "",
-        "=" * 60,
+        "=" * 68,
         "NEWS & FILINGS",
-        "=" * 60,
+        "=" * 68,
         "",
         "  [Stage 2] Material news headlines and new 10-Q / 10-K / 8-K filings,",
         "  filtered for materiality, will appear here per ticker.",
         "",
-        "=" * 60,
+        "=" * 68,
         "DEEP DIVE RESEARCH",
-        "=" * 60,
+        "=" * 68,
         "",
-        "  [Stage 3] Full research reports with a letter grade will be attached",
-        "  here automatically for each stock that moved more than the threshold.",
+        "  [Stage 3] Research reports with a letter grade, on request via chat.",
         "",
     ]
 
     if failures:
-        lines += ["=" * 60, "COULD NOT PRICE", "=" * 60, ""]
+        lines += ["=" * 68, "COULD NOT PRICE", "=" * 68, ""]
         for f in failures:
             lines.append(f"  {f.ticker:<10} {f.reason}")
         lines.append("")
 
-    lines += ["-" * 60, DISCLAIMER]
+    lines += ["-" * 68, DISCLAIMER]
     return "\n".join(lines)
 
 
 def render_html(
-    movers: list[Quote],
-    threshold_pct: float,
+    shown: list[Mover],
+    overflow: list[Mover],
     watched_count: int,
     failures: list[QuoteFailure],
     when: datetime,
 ) -> str:
     up, down, muted = "#0f7b3f", "#b3261e", "#6b7280"
 
-    if movers:
+    if shown:
         rows = []
-        for q in movers:
-            color = up if q.change_pct >= 0 else down
+        for m in shown:
+            color = up if m.change_pct >= 0 else down
             rows.append(
                 f'<tr>'
-                f'<td style="padding:8px 14px 8px 0;font-weight:600;font-size:15px;">{escape(q.ticker)}</td>'
-                f'<td style="padding:8px 14px 8px 0;color:{color};font-weight:600;font-size:15px;white-space:nowrap;">'
-                f'{_arrow(q.change_pct)} {q.change_pct:+.2f}%</td>'
-                f'<td style="padding:8px 0;color:{muted};font-size:14px;white-space:nowrap;">'
-                f'${q.previous_close:,.2f} &rarr; ${q.current:,.2f}</td>'
+                f'<td style="padding:10px 14px 2px 0;font-weight:600;font-size:15px;'
+                f'vertical-align:top;">{escape(m.ticker)}</td>'
+                f'<td style="padding:10px 14px 2px 0;color:{color};font-weight:600;'
+                f'font-size:15px;white-space:nowrap;vertical-align:top;">'
+                f'{_arrow(m.change_pct)} {m.change_pct:+.2f}%</td>'
+                f'<td style="padding:10px 0 2px;color:{muted};font-size:14px;'
+                f'white-space:nowrap;vertical-align:top;">'
+                f'${m.quote.previous_close:,.2f} &rarr; ${m.quote.current:,.2f}</td>'
                 f'</tr>'
+                f'<tr><td></td><td colspan="2" style="padding:0 0 8px;color:{muted};'
+                f'font-size:12.5px;">{escape(m.reason)}</td></tr>'
             )
         movers_block = (
             '<table role="presentation" cellpadding="0" cellspacing="0" '
             'style="border-collapse:collapse;width:100%;">' + "".join(rows) + "</table>"
         )
+        if overflow:
+            tail = ", ".join(
+                f"{escape(m.ticker)} {m.change_pct:+.1f}%" for m in overflow
+            )
+            movers_block += (
+                f'<p style="margin:14px 0 0;color:{muted};font-size:13px;">'
+                f"<strong>+ {len(overflow)} more flagged:</strong> {tail}</p>"
+            )
     else:
         movers_block = (
             f'<p style="margin:0;color:{muted};font-size:15px;">'
-            f"No watchlist stock moved more than {threshold_pct:g}% today.</p>"
+            "Nothing moved unusually for its own range today.</p>"
         )
 
     def section(title: str, body: str) -> str:
         return (
             f'<h2 style="margin:32px 0 12px;font-size:12px;letter-spacing:.09em;'
             f'text-transform:uppercase;color:{muted};font-weight:700;'
-            f'border-bottom:1px solid #e5e7eb;padding-bottom:7px;">{escape(title)}</h2>'
+            f'border-bottom:1px solid #e5e7eb;padding-bottom:7px;">{title}</h2>'
             f"{body}"
         )
 
@@ -157,16 +177,15 @@ def render_html(
     {when:%A, %B %d, %Y} &middot; as of {when:%-I:%M %p %Z}
   </p>
   <p style="margin:0;color:{muted};font-size:13px;">
-    {watched_count} tickers watched &middot; flagging moves over {threshold_pct:g}%
+    {watched_count} tickers watched &middot; flagging moves unusual for each ticker
   </p>
 
-  {section(f"Movers (>{threshold_pct:g}%)", movers_block)}
+  {section("Unusual moves", movers_block)}
   {section("News &amp; filings", placeholder.format(
       "Stage 2 will list material news headlines and new 10-Q / 10-K / 8-K "
       "filings here, grouped by ticker and filtered for materiality."))}
   {section("Deep dive research", placeholder.format(
-      "Stage 3 will add a full research report with a letter grade here for "
-      "each stock that moved more than the threshold."))}
+      "Stage 3 will add research reports with a letter grade, on request."))}
   {failures_block}
 
   <p style="margin:32px 0 0;padding-top:14px;border-top:1px solid #e5e7eb;

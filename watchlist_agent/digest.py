@@ -8,7 +8,9 @@ import sys
 
 from .config import ConfigError, now_et, should_run_for_schedule
 from .email_report import render_html, render_text, send_email, subject_line
-from .prices import fetch_quotes, significant_movers
+from .movers import select_movers, split_for_email
+from .prices import fetch_quotes
+from .volatility import fetch_sigmas
 from .watchlist import Watchlist
 
 log = logging.getLogger("watchlist_agent")
@@ -17,26 +19,24 @@ log = logging.getLogger("watchlist_agent")
 def build_digest(dry_run: bool = False) -> int:
     watchlist = Watchlist()
     tickers = watchlist.tickers
-    threshold = watchlist.move_threshold_pct
-    log.info("pricing %d tickers (threshold %.1f%%)", len(tickers), threshold)
+    thresholds = watchlist.thresholds
+    log.info("pricing %d tickers", len(tickers))
 
     quotes, failures = fetch_quotes(tickers)
-    movers = significant_movers(quotes, threshold)
+    log.info("priced %d/%d tickers", len(quotes), len(tickers))
+
+    sigmas = fetch_sigmas([q.ticker for q in quotes])
+    movers = select_movers(quotes, sigmas, thresholds)
+    shown, overflow = split_for_email(movers, thresholds.max_shown)
     when = now_et()
 
-    log.info(
-        "priced %d/%d tickers, %d movers above %.1f%%",
-        len(quotes),
-        len(tickers),
-        len(movers),
-        threshold,
-    )
-    for q in movers:
-        log.info("  %s %+.2f%%", q.ticker, q.change_pct)
+    log.info("%d moves flagged as unusual", len(movers))
+    for m in movers:
+        log.info("  %s %+.2f%% — %s", m.ticker, m.change_pct, m.reason)
 
-    subject = subject_line(movers, when)
-    text_body = render_text(movers, threshold, len(tickers), failures, when)
-    html_body = render_html(movers, threshold, len(tickers), failures, when)
+    subject = subject_line(shown, when)
+    text_body = render_text(shown, overflow, len(tickers), failures, when)
+    html_body = render_html(shown, overflow, len(tickers), failures, when)
 
     if dry_run:
         print(text_body)

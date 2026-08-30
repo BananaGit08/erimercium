@@ -5,7 +5,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from .config import DEFAULT_MOVE_THRESHOLD_PCT
+from .config import (
+    DEFAULT_ALWAYS_FLAG_ABS_PCT,
+    DEFAULT_MAX_MOVERS_SHOWN,
+    DEFAULT_MIN_ABS_PCT,
+    DEFAULT_MOVE_THRESHOLD_PCT,
+    DEFAULT_Z_SCORE,
+    Thresholds,
+)
 
 WATCHLIST_PATH = Path(__file__).resolve().parent.parent / "watchlist.json"
 
@@ -20,8 +27,17 @@ class Watchlist:
         return list(self._doc.get("tickers", []))
 
     @property
-    def move_threshold_pct(self) -> float:
-        return float(self._doc.get("move_threshold_pct", DEFAULT_MOVE_THRESHOLD_PCT))
+    def thresholds(self) -> Thresholds:
+        cfg = self._doc.get("thresholds", {})
+        return Thresholds(
+            z_score=float(cfg.get("z_score", DEFAULT_Z_SCORE)),
+            min_abs_pct=float(cfg.get("min_abs_pct", DEFAULT_MIN_ABS_PCT)),
+            always_flag_abs_pct=float(
+                cfg.get("always_flag_abs_pct", DEFAULT_ALWAYS_FLAG_ABS_PCT)
+            ),
+            fallback_pct=float(cfg.get("fallback_pct", DEFAULT_MOVE_THRESHOLD_PCT)),
+            max_shown=int(cfg.get("max_shown", DEFAULT_MAX_MOVERS_SHOWN)),
+        )
 
     def add(self, ticker: str) -> bool:
         """Add a ticker. Returns True if it was actually added."""

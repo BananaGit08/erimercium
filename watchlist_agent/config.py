@@ -6,6 +6,7 @@ Every secret is read from the environment. Nothing sensitive is ever committed.
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -19,8 +20,32 @@ EST_CRON = "30 21 * * 1-5"  # 21:30 UTC == 4:30pm EST (November-March)
 
 DEFAULT_MOVE_THRESHOLD_PCT = 3.0
 
+# Defaults for per-ticker flagging; overridable from watchlist.json.
+DEFAULT_Z_SCORE = 2.0
+DEFAULT_MIN_ABS_PCT = 1.5
+DEFAULT_ALWAYS_FLAG_ABS_PCT = 8.0
+DEFAULT_MAX_MOVERS_SHOWN = 12
+
+
+@dataclass(frozen=True)
+class Thresholds:
+    """When a price move counts as worth reporting. See watchlist.json."""
+
+    z_score: float
+    min_abs_pct: float
+    always_flag_abs_pct: float
+    fallback_pct: float
+    max_shown: int
+
 FINNHUB_BASE = "https://finnhub.io/api/v1"
 COINBASE_BASE = "https://api.exchange.coinbase.com"
+STOOQ_BASE = "https://stooq.com"
+
+# Volatility window. ~60 trading days is about three months: long enough to be
+# stable, short enough to track a name whose character has changed.
+VOLATILITY_LOOKBACK_DAYS = 60
+VOLATILITY_MIN_OBSERVATIONS = 30
+VOLATILITY_MAX_WORKERS = 4
 
 # Finnhub's free tier allows 60 requests/minute. Stay comfortably under it.
 FINNHUB_MAX_RPM = 55

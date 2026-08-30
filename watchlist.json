@@ -1,6 +1,13 @@
 {
   "_comment": "Tickers only. Add or remove entries here; the daily digest reads this file. Symbols ending in -USD are priced via Coinbase, everything else via Finnhub.",
-  "move_threshold_pct": 3.0,
+  "thresholds": {
+    "_comment": "A move is flagged when it is unusual for that specific ticker: at least z_score times its own 60-day daily-return standard deviation, and at least min_abs_pct in absolute terms. Any move at or above always_flag_abs_pct is reported regardless -- that ceiling closes the gap where a 7-9% move in a high-volatility name scores under 2 sigma and would otherwise go unreported. Tickers with no price history fall back to fallback_pct. max_shown caps the detailed list; the rest are summarised as a count.",
+    "z_score": 2.0,
+    "min_abs_pct": 1.5,
+    "always_flag_abs_pct": 8.0,
+    "fallback_pct": 3.0,
+    "max_shown": 12
+  },
   "tickers": [
     "AAPL",
     "ABNB",
