@@ -23,6 +23,10 @@ on:
         description: "Print the digest to the job log instead of emailing it"
         type: boolean
         default: false
+      explain:
+        description: "Dump per-ticker volatility and z-scores for tuning"
+        type: boolean
+        default: false
 
 concurrency:
   group: daily-digest
@@ -53,6 +57,7 @@ jobs:
           # Empty for workflow_dispatch; the cron string for scheduled runs.
           TRIGGER_SCHEDULE: ${{ github.event.schedule }}
           DRY_RUN: ${{ inputs.dry_run }}
+          EXPLAIN: ${{ inputs.explain }}
         run: |
           args=()
           if [ -n "$TRIGGER_SCHEDULE" ]; then
@@ -62,5 +67,8 @@ jobs:
           fi
           if [ "$DRY_RUN" = "true" ]; then
             args+=(--dry-run)
+          fi
+          if [ "$EXPLAIN" = "true" ]; then
+            args+=(--explain)
           fi
           python -m watchlist_agent.digest "${args[@]}"
