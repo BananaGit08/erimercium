@@ -30,6 +30,7 @@ from .config import (
     HTTP_TIMEOUT_SECONDS,
     VOLATILITY_LOOKBACK_DAYS,
     VOLATILITY_MAX_WORKERS,
+    MAD_TO_SIGMA,
     VOLATILITY_MIN_OBSERVATIONS,
     YAHOO_BASE,
     YAHOO_USER_AGENT,
@@ -129,6 +130,42 @@ def _coinbase_closes(ticker: str) -> list[float] | None:
     return closes or None
 
 
+def _robust_sigma(returns: list[float]) -> float | None:
+    """Typical daily move, measured so one extraordinary day cannot set the bar.
+
+    Plain standard deviation is the wrong tool here. Every stock has an
+    earnings day each quarter, and that single gap sits in the 60-day window
+    inflating the bar for the whole following quarter -- AMZN's +15.3% on
+    2026-07-31 took its measured sigma from ~1.8% to 2.83%, which is enough to
+    make an ordinary 4% move look unremarkable. Corporate actions are worse:
+    MRNA showed a +176.97% one-day "return" that Yahoo's adjusted close does
+    not correct, giving a 23.62% sigma and rendering the ticker permanently
+    unflaggable.
+
+    The median absolute deviation ignores both. It describes the middle of the
+    distribution, which is what "a normal day for this stock" means, and it is
+    unmoved by however extreme the tails get.
+    """
+    if len(returns) < VOLATILITY_MIN_OBSERVATIONS:
+        return None
+
+    median = statistics.median(returns)
+    mad = statistics.median([abs(r - median) for r in returns])
+    sigma = MAD_TO_SIGMA * mad
+    if sigma > 0:
+        return sigma
+
+    # A zero MAD means more than half the sessions were flat -- rare, but it
+    # would divide by zero. Fall back to a trimmed standard deviation.
+    trimmed = sorted(returns)[2:-2]
+    if len(trimmed) >= 2:
+        sigma = statistics.stdev(trimmed)
+        if sigma > 0:
+            return sigma
+    sigma = statistics.stdev(returns)
+    return sigma or None
+
+
 def _sigma_for(ticker: str) -> tuple[str, float | None]:
     closes = _coinbase_closes(ticker) if is_crypto(ticker) else _yahoo_closes(ticker)
     if not closes:
@@ -138,12 +175,10 @@ def _sigma_for(ticker: str) -> tuple[str, float | None]:
     # what is normal for this stock today.
     window = closes[-(VOLATILITY_LOOKBACK_DAYS + 1) :]
     returns = _daily_returns_pct(window)
-    if len(returns) < VOLATILITY_MIN_OBSERVATIONS:
+    sigma = _robust_sigma(returns)
+    if sigma is None:
         log.debug("%s has only %d usable returns; skipping", ticker, len(returns))
-        return ticker, None
-
-    sigma = statistics.stdev(returns)
-    return ticker, sigma if sigma > 0 else None
+    return ticker, sigma
 
 
 def fetch_sigmas(tickers: list[str]) -> dict[str, float]:

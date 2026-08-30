@@ -95,15 +95,24 @@ deviations. Three guards keep the rule honest at the edges:
 | `always_flag_abs_pct` (8.0%) | A genuinely large move is always reported, even in a name volatile enough to make it unremarkable statistically |
 | `fallback_pct` (3.0%) | Used for any ticker whose history could not be fetched |
 
-Worked against real closes from 2026-08-28:
+"Typical daily move" is the **median absolute deviation** of the trailing
+returns, scaled by 1.4826, not their standard deviation. That choice is not
+cosmetic. Every stock has one earnings gap per quarter, and inside a 60-day
+window a single gap inflates a standard deviation enough to make the stock
+unflaggable until it rolls off:
 
-| Ticker | Move | Typical daily σ | Verdict |
+| Ticker | Outlier in window | Plain stdev | Robust (MAD) |
 |---|---|---|---|
-| PYPL | −12.71% | ~2.0% | flagged — 6.4σ, something happened |
-| AMZN | +3.97% | ~1.5% | flagged — 2.6σ, big for a megacap |
-| TEM | −9.41% | ~5.5% | flagged — only 1.7σ, but clears the 8% ceiling |
-| NVDA | −4.57% | ~2.5% | quiet — 1.8σ, an ordinary NVDA day |
-| RGTI | −5.17% | ~6.0% | quiet — under 1σ, entirely normal |
+| AMZN | +15.32% earnings, 2026-07-31 | 2.83% | 1.95% |
+| MRNA | +176.97% corporate action, 2026-08-19 | 23.62% | 4.81% |
+| SNDK | none — genuinely volatile | 8.83% | 8.91% |
+
+Under plain stdev, AMZN's +3.97% scored 1.40σ and was ignored; under MAD it is
+2.04σ and reported. MRNA was unflaggable at any realistic threshold. SNDK shows
+the estimator does not over-tighten a name that really is that volatile.
+
+Note that Yahoo's `adjclose` is byte-identical to `close` for these tickers, so
+adjusted prices do **not** rescue the MRNA case — only a robust estimator does.
 
 Finnhub's free tier does not serve historical candles (`/stock/candle` returns
 403), so daily closes come from Yahoo's chart API for equities and Coinbase for

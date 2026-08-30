@@ -53,6 +53,10 @@ VOLATILITY_MIN_COVERAGE = 0.5
 # stable, short enough to track a name whose character has changed.
 VOLATILITY_LOOKBACK_DAYS = 60
 VOLATILITY_MIN_OBSERVATIONS = 30
+
+# Scale factor turning a median absolute deviation into a standard-deviation
+# equivalent for normally distributed data.
+MAD_TO_SIGMA = 1.4826
 VOLATILITY_MAX_WORKERS = 4
 
 # Finnhub's free tier allows 60 requests/minute. Stay comfortably under it.
