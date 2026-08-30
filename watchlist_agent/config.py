@@ -40,6 +40,12 @@ class Thresholds:
 FINNHUB_BASE = "https://finnhub.io/api/v1"
 COINBASE_BASE = "https://api.exchange.coinbase.com"
 YAHOO_BASE = "https://query1.finance.yahoo.com"
+SEC_DATA_BASE = "https://data.sec.gov"
+SEC_TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
+SEC_ARCHIVES_BASE = "https://www.sec.gov/Archives/edgar/data"
+
+# SEC asks for no more than 10 requests/second and a descriptive User-Agent.
+SEC_MAX_RPS = 8
 
 # Yahoo serves JSON to plain HTTP clients; Stooq answers datacenter IPs with a
 # JavaScript bot-check page regardless of headers, so it cannot be used here.
@@ -58,6 +64,11 @@ VOLATILITY_MIN_OBSERVATIONS = 30
 # equivalent for normally distributed data.
 MAD_TO_SIGMA = 1.4826
 VOLATILITY_MAX_WORKERS = 4
+
+# How far back to look for news and filings, and how much of it to show.
+NEWS_LOOKBACK_DAYS = 7
+FILINGS_LOOKBACK_DAYS = 10
+MAX_BULLETS_PER_TICKER = 4
 
 # Finnhub's free tier allows 60 requests/minute. Stay comfortably under it.
 FINNHUB_MAX_RPM = 55

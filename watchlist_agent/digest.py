@@ -10,6 +10,7 @@ from .config import ConfigError, now_et, should_run_for_schedule
 from .email_report import render_html, render_text, send_email, subject_line
 from .movers import select_movers, split_for_email
 from .prices import fetch_quotes
+from .research import gather
 from .volatility import coverage_warning, fetch_sigmas
 from .watchlist import Watchlist
 
@@ -71,9 +72,15 @@ def build_digest(dry_run: bool = False) -> int:
     for m in movers:
         log.info("  %s %+.2f%% — %s", m.ticker, m.change_pct, m.reason)
 
+    research = gather([m.ticker for m in shown])
+
     subject = subject_line(shown, when)
-    text_body = render_text(shown, overflow, len(tickers), failures, when, warning)
-    html_body = render_html(shown, overflow, len(tickers), failures, when, warning)
+    text_body = render_text(
+        shown, overflow, len(tickers), failures, when, warning, research
+    )
+    html_body = render_html(
+        shown, overflow, len(tickers), failures, when, warning, research
+    )
 
     if dry_run:
         print(text_body)

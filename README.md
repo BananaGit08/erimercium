@@ -11,7 +11,7 @@ what is happening to them.
 | Stage | Scope | State |
 |---|---|---|
 | 1 | Price digest — per-ticker move detection, email at 4:30pm ET | **Done** |
-| 2 | Company news + SEC filings (10-Q / 10-K / 8-K), materiality-filtered | Not started |
+| 2 | Company news + SEC filings (10-Q / 10-K / 8-K), materiality-filtered | **Done** |
 | 3 | Deep-dive research reports with a letter grade | Not started |
 | 4 | Formatting, source links, filter tuning | Not started |
 
@@ -162,10 +162,44 @@ watchlist_agent/
   prices.py                        Finnhub quotes, Coinbase crypto, rate limiting
   volatility.py                    per-ticker daily-return sigma from Stooq/Coinbase
   movers.py                        which moves clear the bar
+  news.py                          Finnhub company news
+  filings.py                       SEC EDGAR submissions, ticker -> CIK
+  materiality.py                   what is worth reading
+  research.py                      per-ticker gathering
   email_report.py                  text + HTML rendering, Gmail SMTP
   digest.py                        entry point
 .github/workflows/daily-digest.yml schedule + manual dispatch
 ```
+
+## News and filings
+
+For each **flagged** ticker only, the digest gathers recent company news
+(Finnhub) and recent SEC filings (EDGAR), and lists what survives filtering
+underneath the move that prompted it. Researching all 100 names daily would
+mean ~200 requests to answer a question nobody asked about the ~90 that did
+nothing.
+
+**Filings are classified, not keyword-matched.** 10-K and 10-Q always count. An
+8-K counts only if its item codes say something — 5.02 (officer departure),
+4.02 (financials cannot be relied upon), 2.02 (results), 1.01 (material
+agreement) and similar. Routine Reg FD and shareholder-vote 8-Ks are dropped.
+This is why the digest uses EDGAR's **submissions** feed rather than full-text
+search: full-text search answers "which filings contain this phrase" and needs
+a query term, so it cannot enumerate a company's recent filings. The
+submissions feed lists form types and 8-K item codes directly.
+
+**News is keyword-filtered**, and this is the part weakened by running without
+an LLM. A headline is dropped if it matches a never-material *format*
+(listicles, "here's why the stock is moving", market wraps, Cramer), and kept
+only if it scores on a material subject (M&A, guidance, executive changes,
+investigations, approvals, breaches). The filter judges shape and vocabulary,
+not substance, so it will pass some noise and drop some real stories that are
+worded unusually. Bullets are the headline itself with a source link, not a
+synthesised takeaway — writing "the major takeaway" needs a model.
+
+Tickers with no US filings (foreign private issuers like `ASML` and `BABA`,
+ETFs like `FBTC`, OTC symbols like `HYMLF`) simply have no CIK in EDGAR and are
+skipped; crypto pairs have neither news feed nor filings.
 
 ## Disclaimer
 

@@ -9,6 +9,7 @@ from email.message import EmailMessage
 from html import escape
 
 from .config import gmail_address, gmail_app_password, recipient_address
+from .materiality import Bullet
 from .movers import Mover
 from .prices import QuoteFailure
 
@@ -21,6 +22,26 @@ DISCLAIMER = (
     "This digest is a synthesis of public information for research purposes, "
     "not financial advice."
 )
+
+
+def _bullet_rows(bullets: list[Bullet], muted: str) -> str:
+    """Material news and filings shown beneath the move that prompted them."""
+    if not bullets:
+        return ""
+    items = []
+    for b in bullets:
+        label = escape(b.text)
+        if b.url:
+            label = (
+                f'<a href="{escape(b.url, quote=True)}" '
+                f'style="color:#1a4fa0;text-decoration:none;">{label}</a>'
+            )
+        items.append(f'<li style="margin:0 0 3px;">{label}</li>')
+    return (
+        f'<tr><td></td><td colspan="2" style="padding:0 0 10px;">'
+        f'<ul style="margin:0;padding-left:18px;color:#374151;font-size:13px;'
+        f'line-height:1.45;">{"".join(items)}</ul></td></tr>'
+    )
 
 
 def _arrow(pct: float) -> str:
@@ -47,7 +68,9 @@ def render_text(
     failures: list[QuoteFailure],
     when: datetime,
     warning: str | None = None,
+    research: dict[str, list[Bullet]] | None = None,
 ) -> str:
+    research = research or {}
     lines = [
         f"WATCHLIST DIGEST — {when:%A, %B %d, %Y} (as of {when:%-I:%M %p %Z})",
         f"{watched_count} tickers watched — flagging moves unusual for each ticker",
@@ -67,23 +90,22 @@ def render_text(
                 f"${m.quote.previous_close:,.2f} -> ${m.quote.current:,.2f}"
             )
             lines.append(f"      {m.reason}")
+            for b in research.get(m.ticker, []):
+                lines.append(f"        - {b.text}")
+                if b.url:
+                    lines.append(f"          {b.url}")
         if overflow:
             lines += [
                 "",
                 f"  + {len(overflow)} more flagged: "
                 + ", ".join(f"{m.ticker} {m.change_pct:+.1f}%" for m in overflow),
             ]
+        if not any(research.get(m.ticker) for m in shown):
+            lines += ["", "  No material news or filings found for these movers."]
     else:
         lines.append("  Nothing moved unusually for its own range today.")
 
     lines += [
-        "",
-        "=" * 68,
-        "NEWS & FILINGS",
-        "=" * 68,
-        "",
-        "  [Stage 2] Material news headlines and new 10-Q / 10-K / 8-K filings,",
-        "  filtered for materiality, will appear here per ticker.",
         "",
         "=" * 68,
         "DEEP DIVE RESEARCH",
@@ -110,7 +132,9 @@ def render_html(
     failures: list[QuoteFailure],
     when: datetime,
     warning: str | None = None,
+    research: dict[str, list[Bullet]] | None = None,
 ) -> str:
+    research = research or {}
     up, down, muted = "#0f7b3f", "#b3261e", "#6b7280"
 
     if shown:
@@ -128,8 +152,9 @@ def render_html(
                 f'white-space:nowrap;vertical-align:top;">'
                 f'${m.quote.previous_close:,.2f} &rarr; ${m.quote.current:,.2f}</td>'
                 f'</tr>'
-                f'<tr><td></td><td colspan="2" style="padding:0 0 8px;color:{muted};'
+                f'<tr><td></td><td colspan="2" style="padding:0 0 4px;color:{muted};'
                 f'font-size:12.5px;">{escape(m.reason)}</td></tr>'
+                + _bullet_rows(research.get(m.ticker, []), muted)
             )
         movers_block = (
             '<table role="presentation" cellpadding="0" cellspacing="0" '
@@ -194,9 +219,6 @@ def render_html(
 
   {warning_block}
   {section("Unusual moves", movers_block)}
-  {section("News &amp; filings", placeholder.format(
-      "Stage 2 will list material news headlines and new 10-Q / 10-K / 8-K "
-      "filings here, grouped by ticker and filtered for materiality."))}
   {section("Deep dive research", placeholder.format(
       "Stage 3 will add research reports with a letter grade, on request."))}
   {failures_block}
