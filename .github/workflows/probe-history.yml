@@ -1,0 +1,18 @@
+name: Probe history sources
+
+# Diagnostic only. The sandbox where this code is written has no outbound
+# network, so reachability of third-party data sources has to be checked here.
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: python tools/probe_history.py
