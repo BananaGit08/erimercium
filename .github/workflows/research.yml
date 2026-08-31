@@ -29,10 +29,20 @@ on:
         type: string
         default: "3"
 
+# The job commits reports_sent.json back after sending. Without this the
+# default GITHUB_TOKEN is read-only, the push is refused with a 403, and every
+# report delivered that day is re-sent the next day and every day after --
+# which is exactly what happened on the first scheduled run.
+permissions:
+  contents: write
+
 jobs:
   research:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # One AAPL baseline took 25 minutes on its own, so a batch of six has no
+    # chance inside 45. Delivery state survives a timeout via always() below,
+    # but a run cut off mid-report wastes the credit spent on it.
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -89,4 +99,14 @@ jobs:
           git config user.email "christian@banananorth.com"
           git add reports_sent.json
           git commit -m "Record research reports sent on $(date -u +%Y-%m-%d)"
-          git push
+          # Rebase before pushing: a commit landing on Main while the batch was
+          # running would otherwise reject the push and lose the record of what
+          # was already emailed.
+          for attempt in 1 2 3; do
+            git pull --rebase --autostash origin "${GITHUB_REF_NAME}" && \
+              git push origin "HEAD:${GITHUB_REF_NAME}" && exit 0
+            echo "push attempt $attempt failed; retrying"
+            sleep $((attempt * 5))
+          done
+          echo "::error::could not record delivered reports -- they will be re-sent"
+          exit 1

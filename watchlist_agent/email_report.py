@@ -114,11 +114,17 @@ def render_text(
         lines.append("  Nothing moved unusually for its own range today.")
 
     if earnings:
+        head, tail = earnings[:MAX_EARNINGS_SHOWN], earnings[MAX_EARNINGS_SHOWN:]
         lines += ["", "=" * 68, "REPORTING SOON", "=" * 68, ""]
-        for event in earnings:
+        for event in head:
             lines.append(
                 f"  {event.ticker:<8} {event.date:%b %d}  {event.period}"
                 f"{'  ' + event.timing if event.timing else ''}"
+            )
+        if tail:
+            lines.append(
+                f"\n  + {len(tail)} more later that fortnight: "
+                + ", ".join(e.ticker for e in tail)
             )
         lines += [
             "",
@@ -206,6 +212,7 @@ def render_html(
 
     earnings_block = ""
     if earnings:
+        head, tail = earnings[:MAX_EARNINGS_SHOWN], earnings[MAX_EARNINGS_SHOWN:]
         rows = "".join(
             f'<tr>'
             f'<td style="padding:5px 16px 5px 0;font-weight:600;font-size:14px;">'
@@ -215,13 +222,22 @@ def render_html(
             f'<td style="padding:5px 0;color:{muted};font-size:13px;">'
             f"{escape(e.period)}{escape(' · ' + e.timing) if e.timing else ''}</td>"
             f"</tr>"
-            for e in earnings
+            for e in head
         )
+        overflow_line = ""
+        if tail:
+            overflow_line = (
+                f'<p style="margin:11px 0 0;color:{muted};font-size:13px;">'
+                f"<strong>+ {len(tail)} more later that fortnight:</strong> "
+                + escape(", ".join(e.ticker for e in tail))
+                + "</p>"
+            )
         earnings_block = section(
             "Reporting soon",
             '<table role="presentation" cellpadding="0" cellspacing="0" '
             f'style="border-collapse:collapse;">{rows}</table>'
-            f'<p style="margin:12px 0 0;color:{muted};font-size:13px;">'
+            + overflow_line
+            + f'<p style="margin:12px 0 0;color:{muted};font-size:13px;">'
             f"A full report on each goes out {EARNINGS_LEAD_DAYS} days before "
             "it reports.</p>",
         )
@@ -343,6 +359,11 @@ def _key_figures(dossier) -> list[tuple[str, str]]:
         ))
     return figures
 
+
+# Peak earnings season puts 20+ of the watchlist inside a fortnight, which is
+# more than a daily email should spend on a preview. The nearest few are the
+# ones worth naming in full; the rest are a list of tickers.
+MAX_EARNINGS_SHOWN = 8
 
 MAX_COVERAGE_NEWS = 6
 
