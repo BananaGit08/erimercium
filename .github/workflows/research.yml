@@ -23,7 +23,7 @@ on:
 jobs:
   research:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -61,7 +61,11 @@ jobs:
           python -m watchlist_agent.deep_dive "${args[@]}"
 
       - name: Record what was sent
-        if: ${{ inputs.run_due == true && inputs.dossier_only != true }}
+        # always(): the first batch was cancelled on timeout after emailing four
+        # reports, and this step was skipped -- so the next run would have sent
+        # them again. Whatever was delivered must be recorded even when the job
+        # does not finish cleanly.
+        if: ${{ always() && inputs.run_due == true && inputs.dossier_only != true }}
         run: |
           if git diff --quiet -- reports_sent.json; then
             echo "no new reports recorded"

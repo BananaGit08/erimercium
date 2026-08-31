@@ -96,7 +96,7 @@ def _generate_and_send(request: ReportRequest, state: ReportState, dry_run: bool
     return True
 
 
-def run_due(baseline_limit: int, dry_run: bool) -> int:
+def run_due(baseline_limit: int, dry_run: bool, max_reports: int = 6) -> int:
     """Generate and send every report that is due today."""
     watchlist = Watchlist()
     state = ReportState()
@@ -113,7 +113,18 @@ def run_due(baseline_limit: int, dry_run: bool) -> int:
         log.info("nothing due today")
         return 0
 
-    log.info("%d reports due: %s", len(pending),
+    if len(pending) > max_reports:
+        # Earnings cluster: 8 of the watchlist report within a week of each
+        # other, and at ~5 minutes each a full queue outlives any sensible job
+        # timeout. Take the front of the queue; the rest are still due
+        # tomorrow, and earnings are ordered soonest-first.
+        log.warning(
+            "%d reports due but capping this run at %d; the remainder stay due",
+            len(pending), max_reports,
+        )
+        pending = pending[:max_reports]
+
+    log.info("%d reports this run: %s", len(pending),
              ", ".join(f"{r.ticker}({r.kind})" for r in pending))
 
     sent = 0
@@ -177,6 +188,12 @@ def main(argv: list[str] | None = None) -> int:
         help="Generate and email every report that is due today.",
     )
     parser.add_argument(
+        "--max-reports",
+        type=int,
+        default=6,
+        help="Hard cap on reports generated in one run (default 6).",
+    )
+    parser.add_argument(
         "--baseline-limit",
         type=int,
         default=5,
@@ -188,7 +205,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         if args.run:
-            return run_due(args.baseline_limit, args.dossier_only)
+            return run_due(args.baseline_limit, args.dossier_only, args.max_reports)
         if args.due:
             return show_due(args.baseline_limit)
         if args.ticker:

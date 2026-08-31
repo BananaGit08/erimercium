@@ -1,6 +1,19 @@
 {
   "_comment": "Research reports already sent. Earnings reports are keyed by fiscal period so a rescheduled date does not cause a repeat; event reports are keyed by SEC accession number.",
   "baseline": {},
-  "earnings": {},
+  "earnings": {
+    "ASAN": {
+      "2027Q2": "2026-08-31"
+    },
+    "AVGO": {
+      "2026Q3": "2026-08-31"
+    },
+    "HPE": {
+      "2026Q3": "2026-08-31"
+    },
+    "SNOW": {
+      "2027Q2": "2026-08-31"
+    }
+  },
   "events": {}
 }

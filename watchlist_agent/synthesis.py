@@ -213,6 +213,42 @@ def synthesize(dossier: Dossier, model: str | None = None) -> Report:
     server_use = getattr(usage, "server_tool_use", None) if usage else None
     report.searches = getattr(server_use, "web_search_requests", 0) or 0
 
+    if "Summary" not in report.sections and report.sections:
+        # Three of four reports in the first real batch dropped SUMMARY despite
+        # the prompt requiring it, so asking more firmly is not a fix. Ask for
+        # the one missing paragraph directly: it is cheap, needs no search, and
+        # cannot be skipped because it is the entire response.
+        log.info("%s: summary missing, requesting it separately", dossier.ticker)
+        try:
+            body = "\n\n".join(
+                f"{label}\n{report.sections[label]}"
+                for _, label in SECTIONS
+                if label in report.sections
+            )
+            follow_up = client.messages.create(
+                model=model,
+                max_tokens=1000,
+                system=(
+                    "Write one paragraph summarising what is going on at this "
+                    "company, for a reader who will read nothing else. State "
+                    "the situation, not a recommendation. Use only what the "
+                    "report below establishes. Reply with the paragraph alone "
+                    "-- no heading, no preamble."
+                ),
+                messages=[{
+                    "role": "user",
+                    "content": f"Report on {dossier.title}:\n\n{body}",
+                }],
+            )
+            text_out = "".join(
+                b.text for b in follow_up.content if b.type == "text"
+            ).strip()
+            if text_out:
+                report.sections["Summary"] = text_out
+                log.info("%s: summary recovered", dossier.ticker)
+        except Exception as exc:  # noqa: BLE001 - a missing summary is not fatal
+            log.warning("%s: could not recover summary: %s", dossier.ticker, exc)
+
     expected = {label for _, label in SECTIONS}
     absent = expected - set(report.sections)
     if absent:
