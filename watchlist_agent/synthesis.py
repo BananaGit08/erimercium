@@ -156,6 +156,26 @@ class SynthesisUnavailable(RuntimeError):
     """Raised when no API key is configured."""
 
 
+class CreditsExhausted(RuntimeError):
+    """Raised when the Anthropic account is out of prepaid credit.
+
+    Worth its own type rather than being folded into the generic per-ticker
+    failure path: it is not a problem with one company's data, it will hit
+    every remaining report in the batch identically, and unlike every other
+    failure here it needs a human to spend money before anything works again.
+    """
+
+
+def _is_credit_error(exc: Exception) -> bool:
+    # The API reports an empty balance as a 400 invalid_request_error whose
+    # message names the credit balance, so the status code alone cannot
+    # distinguish it from a malformed request. 402 is checked too in case that
+    # ever becomes the response.
+    if getattr(exc, "status_code", None) == 402:
+        return True
+    return "credit balance" in str(exc).lower()
+
+
 def available() -> bool:
     return bool(os.environ.get("ANTHROPIC_API_KEY", "").strip())
 
@@ -268,6 +288,31 @@ def synthesize(dossier: Dossier, model: str | None = None) -> Report:
     log.info("synthesising %s report for %s (%d chars of context, model %s)",
              dossier.kind, dossier.ticker, len(context), model)
 
+    try:
+        message = _request_report(client, model, dossier, context)
+    except Exception as exc:  # noqa: BLE001 - re-raised; classified first
+        if _is_credit_error(exc):
+            raise CreditsExhausted(str(exc)) from exc
+        raise
+
+    if message.stop_reason == "refusal":
+        raise RuntimeError(
+            f"model declined to produce the report for {dossier.ticker}"
+        )
+
+    text = "".join(b.text for b in message.content if b.type == "text")
+    report, ranges = _parse(text, dossier.ticker, dossier.kind)
+    report.sources = _collect_sources(message.content, ranges)
+    report.model = message.model
+    usage = getattr(message, "usage", None)
+    server_use = getattr(usage, "server_tool_use", None) if usage else None
+    report.searches = getattr(server_use, "web_search_requests", 0) or 0
+    _fill_missing_summary(client, model, dossier, report)
+    _warn_on_gaps(dossier, report)
+    return report
+
+
+def _request_report(client, model: str, dossier: Dossier, context: str):
     with client.messages.stream(
         model=model,
         max_tokens=64000,
@@ -288,21 +333,10 @@ def synthesize(dossier: Dossier, model: str | None = None) -> Report:
             ),
         }],
     ) as stream:
-        message = stream.get_final_message()
+        return stream.get_final_message()
 
-    if message.stop_reason == "refusal":
-        raise RuntimeError(
-            f"model declined to produce the report for {dossier.ticker}"
-        )
 
-    text = "".join(b.text for b in message.content if b.type == "text")
-    report, ranges = _parse(text, dossier.ticker, dossier.kind)
-    report.sources = _collect_sources(message.content, ranges)
-    report.model = message.model
-    usage = getattr(message, "usage", None)
-    server_use = getattr(usage, "server_tool_use", None) if usage else None
-    report.searches = getattr(server_use, "web_search_requests", 0) or 0
-
+def _fill_missing_summary(client, model: str, dossier: Dossier, report: Report) -> None:
     if "Summary" not in report.sections and report.sections:
         # Three of four reports in the first real batch dropped SUMMARY despite
         # the prompt requiring it, so asking more firmly is not a fix. Ask for
@@ -339,6 +373,8 @@ def synthesize(dossier: Dossier, model: str | None = None) -> Report:
         except Exception as exc:  # noqa: BLE001 - a missing summary is not fatal
             log.warning("%s: could not recover summary: %s", dossier.ticker, exc)
 
+
+def _warn_on_gaps(dossier: Dossier, report: Report) -> None:
     expected = {label for _, label in SECTIONS}
     absent = expected - set(report.sections)
     if absent:
@@ -366,4 +402,3 @@ def synthesize(dossier: Dossier, model: str | None = None) -> Report:
     log.info("%s report: grade %s, %d/%d sections, %d searches, %d sources",
              dossier.ticker, report.grade or "?", len(report.sections),
              len(expected), report.searches, len(report.all_sources))
-    return report

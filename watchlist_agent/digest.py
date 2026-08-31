@@ -5,9 +5,13 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+from datetime import date, timedelta
 
-from .config import ConfigError, now_et, should_run_for_schedule
+import requests
+
+from .config import EARNINGS_LEAD_DAYS, ConfigError, now_et, should_run_for_schedule
 from .email_report import render_html, render_text, send_email, subject_line
+from .earnings import fetch_calendar, for_watchlist
 from .movers import select_movers, split_for_email
 from .prices import fetch_quotes
 from .research import gather
@@ -52,6 +56,37 @@ def explain() -> int:
     return 0
 
 
+# How far ahead the digest previews earnings. A pre-earnings report goes out
+# one week before a company reports, so a fortnight covers both the report
+# already sent and the one still coming.
+EARNINGS_PREVIEW_DAYS = 14
+
+
+def upcoming_earnings(tickers: list[str]) -> list:
+    """Watchlist companies reporting soon, soonest first.
+
+    The digest used to close with a placeholder promising research reports
+    "on request", which stopped being true the moment Stage 3 went on a
+    schedule. Naming who reports next is the accurate version of the same
+    thing, and it tells the reader when to expect the next report rather than
+    leaving the two emails to look unrelated.
+    """
+    try:
+        with requests.Session() as session:
+            session.headers["User-Agent"] = "erimercium-watchlist-agent"
+            calendar = for_watchlist(fetch_calendar(session), tickers)
+    except Exception as exc:  # noqa: BLE001 - a preview must never cost a digest
+        log.warning("earnings preview unavailable: %s: %s", type(exc).__name__, exc)
+        return []
+
+    horizon = date.today() + timedelta(days=EARNINGS_PREVIEW_DAYS)
+    events = [e for e in calendar.values() if e.date <= horizon]
+    events.sort(key=lambda e: e.date)
+    log.info("%d watchlist companies report within %d days",
+             len(events), EARNINGS_PREVIEW_DAYS)
+    return events
+
+
 def build_digest(dry_run: bool = False) -> int:
     watchlist = Watchlist()
     tickers = watchlist.tickers
@@ -73,13 +108,14 @@ def build_digest(dry_run: bool = False) -> int:
         log.info("  %s %+.2f%% — %s", m.ticker, m.change_pct, m.reason)
 
     research = gather([m.ticker for m in shown])
+    earnings = upcoming_earnings(tickers)
 
     subject = subject_line(shown, when)
     text_body = render_text(
-        shown, overflow, len(tickers), failures, when, warning, research
+        shown, overflow, len(tickers), failures, when, warning, research, earnings
     )
     html_body = render_html(
-        shown, overflow, len(tickers), failures, when, warning, research
+        shown, overflow, len(tickers), failures, when, warning, research, earnings
     )
 
     if dry_run:

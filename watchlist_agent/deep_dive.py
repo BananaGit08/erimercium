@@ -21,12 +21,18 @@ from .email_report import (
     render_research_html,
     render_research_text,
     research_subject,
+    send_credit_notice,
     send_email,
 )
 from .earnings import fetch_calendar, for_watchlist
 from .report_state import ReportState
 from .scheduler import ReportRequest, due_for_baseline, due_for_earnings
-from .synthesis import SynthesisUnavailable, available, synthesize
+from .synthesis import (
+    CreditsExhausted,
+    SynthesisUnavailable,
+    available,
+    synthesize,
+)
 from .watchlist import Watchlist
 
 log = logging.getLogger("watchlist_agent.deep_dive")
@@ -76,6 +82,10 @@ def _generate_and_send(request: ReportRequest, state: ReportState, dry_run: bool
         # take down the rest of the batch.
         dossier = build(request.ticker, kind=request.kind, reason=request.reason)
         report = synthesize(dossier)
+    except CreditsExhausted:
+        # Deliberately not swallowed. Every remaining report in the batch would
+        # fail the same way, and the batch is not the thing that needs fixing.
+        raise
     except Exception as exc:  # noqa: BLE001 - one failure must not stop the batch
         log.error("%s report failed: %s: %s", request.ticker, type(exc).__name__, exc)
         return False
@@ -134,9 +144,24 @@ def run_due(baseline_limit: int, dry_run: bool, max_reports: int = 6) -> int:
              ", ".join(f"{r.ticker}({r.kind})" for r in pending))
 
     sent = 0
-    for request in pending:
+    for index, request in enumerate(pending):
         log.info("--- %s (%s): %s", request.ticker, request.kind, request.reason)
-        if _generate_and_send(request, state, dry_run):
+        try:
+            delivered = _generate_and_send(request, state, dry_run)
+        except CreditsExhausted as exc:
+            # Without this the reports simply stop arriving and nothing says
+            # why: the digest keeps working (it needs no model), the run looks
+            # like any other, and the first sign of trouble is a client
+            # wondering where his pre-earnings report went. Say it out loud,
+            # to the person who can fix it, once per run.
+            remaining = [r.ticker for r in pending[index:]]
+            log.error("out of Anthropic credit — %d reports not written: %s",
+                      len(remaining), ", ".join(remaining))
+            if not dry_run:
+                send_credit_notice(remaining, str(exc))
+            log.info("sent %d before running out; state now %s", sent, state.counts())
+            return 1
+        if delivered:
             sent += 1
             # Persist after each send so an interrupted batch does not repeat
             # work already delivered.
@@ -164,12 +189,19 @@ def one_report(ticker: str, dossier_only: bool) -> int:
     except SynthesisUnavailable as exc:
         log.error("%s", exc)
         return 1
+    except CreditsExhausted as exc:
+        log.error("out of Anthropic credit, so no report can be written: %s", exc)
+        return 1
 
     print(f"\n{'=' * 70}\n{dossier.title} — {report.grade or 'ungraded'}\n{'=' * 70}\n")
     for label in ("Summary", "Leadership", "Financial health", "Valuation",
                   "Analyst sentiment", "Catalysts and risks"):
         if label in report.sections:
             print(f"{label.upper()}\n{report.sections[label]}\n")
+            for source in report.sources.get(label, []):
+                print(f"  source: {source.label} — {source.url}")
+            if report.sources.get(label):
+                print()
     if report.grade:
         print(f"GRADE: {report.grade}\n{report.grade_reason}\n")
     return 0

@@ -8,7 +8,13 @@ from datetime import datetime
 from email.message import EmailMessage
 from html import escape
 
-from .config import gmail_address, gmail_app_password, now_et, recipient_address
+from .config import (
+    EARNINGS_LEAD_DAYS,
+    gmail_address,
+    gmail_app_password,
+    now_et,
+    recipient_address,
+)
 from .materiality import Bullet
 from .movers import Mover
 from .prices import QuoteFailure
@@ -69,8 +75,10 @@ def render_text(
     when: datetime,
     warning: str | None = None,
     research: dict[str, list[Bullet]] | None = None,
+    earnings: list | None = None,
 ) -> str:
     research = research or {}
+    earnings = earnings or []
     lines = [
         f"WATCHLIST DIGEST — {when:%A, %B %d, %Y} (as of {when:%-I:%M %p %Z})",
         f"{watched_count} tickers watched — flagging moves unusual for each ticker",
@@ -105,15 +113,19 @@ def render_text(
     else:
         lines.append("  Nothing moved unusually for its own range today.")
 
-    lines += [
-        "",
-        "=" * 68,
-        "DEEP DIVE RESEARCH",
-        "=" * 68,
-        "",
-        "  [Stage 3] Research reports with a letter grade, on request via chat.",
-        "",
-    ]
+    if earnings:
+        lines += ["", "=" * 68, "REPORTING SOON", "=" * 68, ""]
+        for event in earnings:
+            lines.append(
+                f"  {event.ticker:<8} {event.date:%b %d}  {event.period}"
+                f"{'  ' + event.timing if event.timing else ''}"
+            )
+        lines += [
+            "",
+            f"  A full report on each goes out {EARNINGS_LEAD_DAYS} days before "
+            "it reports.",
+            "",
+        ]
 
     if failures:
         lines += ["=" * 68, "COULD NOT PRICE", "=" * 68, ""]
@@ -133,8 +145,10 @@ def render_html(
     when: datetime,
     warning: str | None = None,
     research: dict[str, list[Bullet]] | None = None,
+    earnings: list | None = None,
 ) -> str:
     research = research or {}
+    earnings = earnings or []
     up, down, muted = "#0f7b3f", "#b3261e", "#6b7280"
 
     if shown:
@@ -182,16 +196,34 @@ def render_html(
             f"{body}"
         )
 
-    placeholder = (
-        f'<p style="margin:0;color:{muted};font-size:14px;font-style:italic;">{{}}</p>'
-    )
-
     warning_block = ""
     if warning:
         warning_block = (
             '<p style="margin:24px 0 0;padding:11px 13px;border-radius:6px;'
             'background:#fef6e7;border:1px solid #f5d9a3;color:#7a4f01;'
             f'font-size:13px;line-height:1.5;">&#9888; {escape(warning)}</p>'
+        )
+
+    earnings_block = ""
+    if earnings:
+        rows = "".join(
+            f'<tr>'
+            f'<td style="padding:5px 16px 5px 0;font-weight:600;font-size:14px;">'
+            f"{escape(e.ticker)}</td>"
+            f'<td style="padding:5px 16px 5px 0;font-size:14px;'
+            f'white-space:nowrap;">{e.date:%b %d}</td>'
+            f'<td style="padding:5px 0;color:{muted};font-size:13px;">'
+            f"{escape(e.period)}{escape(' · ' + e.timing) if e.timing else ''}</td>"
+            f"</tr>"
+            for e in earnings
+        )
+        earnings_block = section(
+            "Reporting soon",
+            '<table role="presentation" cellpadding="0" cellspacing="0" '
+            f'style="border-collapse:collapse;">{rows}</table>'
+            f'<p style="margin:12px 0 0;color:{muted};font-size:13px;">'
+            f"A full report on each goes out {EARNINGS_LEAD_DAYS} days before "
+            "it reports.</p>",
         )
 
     failures_block = ""
@@ -219,8 +251,7 @@ def render_html(
 
   {warning_block}
   {section("Unusual moves", movers_block)}
-  {section("Deep dive research", placeholder.format(
-      "Stage 3 will add research reports with a letter grade, on request."))}
+  {earnings_block}
   {failures_block}
 
   <p style="margin:32px 0 0;padding-top:14px;border-top:1px solid #e5e7eb;
@@ -519,3 +550,51 @@ def render_research_html(report, dossier) -> str:
     {escape(RESEARCH_DISCLAIMER)}
   </p>
 </div>"""
+
+
+def send_credit_notice(pending: list[str], detail: str) -> None:
+    """Tell the reader that research has stopped, and why.
+
+    Delivery does not depend on the thing that failed: email goes over Gmail
+    and needs no API credit, so this arrives precisely when reports cannot.
+    The daily digest is unaffected and keeps running, which is worth saying --
+    otherwise silence on the research side reads as the whole system being
+    down.
+    """
+    queued = ", ".join(pending) if pending else "none"
+    text = "\n".join([
+        "RESEARCH REPORTS PAUSED",
+        "",
+        "The research reports have stopped because the Anthropic API account "
+        "is out of credit.",
+        "",
+        f"Waiting to be written: {queued}",
+        "",
+        "The daily market digest is not affected and will keep arriving on "
+        "schedule -- it does not use the API. Research reports resume by "
+        "themselves once credit is added; nothing needs to be restarted, and "
+        "nothing queued has been lost.",
+        "",
+        f"Reported by the API as: {detail}",
+    ])
+    html = (
+        '<div style="font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\','
+        'Helvetica,Arial,sans-serif;max-width:640px;margin:0 auto;'
+        'padding:28px 24px;color:#111827;">'
+        '<h1 style="margin:0 0 14px;font-size:19px;font-weight:700;">'
+        "Research reports paused</h1>"
+        '<p style="margin:0 0 12px;font-size:14px;line-height:1.6;">The research '
+        "reports have stopped because the Anthropic API account is out of "
+        "credit.</p>"
+        f'<p style="margin:0 0 12px;font-size:14px;line-height:1.6;">'
+        f"<strong>Waiting to be written:</strong> {escape(queued)}</p>"
+        '<p style="margin:0 0 12px;font-size:14px;line-height:1.6;">The daily '
+        "market digest is not affected and will keep arriving on schedule "
+        "&mdash; it does not use the API. Research reports resume by "
+        "themselves once credit is added; nothing needs to be restarted, and "
+        "nothing queued has been lost.</p>"
+        f'<p style="margin:22px 0 0;padding-top:12px;border-top:1px solid '
+        f'#e5e7eb;color:#6b7280;font-size:12px;line-height:1.5;">'
+        f"Reported by the API as: {escape(detail)}</p></div>"
+    )
+    send_email("Research reports paused — Anthropic credit exhausted", text, html)
