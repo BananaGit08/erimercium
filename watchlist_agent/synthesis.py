@@ -18,7 +18,13 @@ log = logging.getLogger(__name__)
 
 # The client chose the lower-cost tier; override with RESEARCH_MODEL to compare.
 DEFAULT_MODEL = "claude-sonnet-5"
-MAX_WEB_SEARCHES = 6
+
+# Six was too few. The first DOCU report spent four of its bullets explaining
+# that the search limit stopped it verifying the CEO's track record, the 8-K
+# officer change and the analyst ratings -- the three things web search is
+# there to supply. At $10 per 1,000 searches this ceiling costs about six
+# cents a report.
+MAX_WEB_SEARCHES = 14
 
 DISCLAIMER = (
     "This report is a synthesis of public information for research purposes, "
@@ -132,6 +138,8 @@ class Report:
     # one pile so a reader checking the valuation claim is not handed the
     # leadership sources as well.
     sources: dict[str, list[Source]] = field(default_factory=dict)
+    # Pages the search tool returned, used when the model cites nothing.
+    searched: list[Source] = field(default_factory=list)
     raw: str = ""
     model: str = ""
     searches: int = 0
@@ -225,6 +233,36 @@ def _parse(text: str, ticker: str, kind: str) -> tuple[Report, dict[str, tuple[i
     return report, ranges
 
 
+def _searched_sources(blocks) -> list[Source]:
+    """Every page the search tool returned, as a fallback for citations.
+
+    Citations are the better signal, because they say which claim rests on
+    which page. But a report with no links at all is the worse failure, and
+    this cannot be defeated by a change in how the model attributes its
+    sources -- the result blocks are there whenever a search ran.
+    """
+    seen: set[str] = set()
+    found: list[Source] = []
+    for block in blocks:
+        if getattr(block, "type", "") != "web_search_tool_result":
+            continue
+        content = getattr(block, "content", None)
+        # On failure content is a single error object rather than a list, so
+        # branch on the shape before iterating it.
+        if not isinstance(content, list):
+            log.warning("web search returned an error block: %s",
+                        getattr(content, "error_code", content))
+            continue
+        for result in content:
+            url = (getattr(result, "url", "") or "").strip()
+            if url and url not in seen:
+                seen.add(url)
+                found.append(
+                    Source(url=url, title=(getattr(result, "title", "") or "").strip())
+                )
+    return found
+
+
 def _collect_sources(
     blocks, ranges: dict[str, tuple[int, int]]
 ) -> dict[str, list[Source]]:
@@ -303,6 +341,7 @@ def synthesize(dossier: Dossier, model: str | None = None) -> Report:
     text = "".join(b.text for b in message.content if b.type == "text")
     report, ranges = _parse(text, dossier.ticker, dossier.kind)
     report.sources = _collect_sources(message.content, ranges)
+    report.searched = _searched_sources(message.content)
     report.model = message.model
     usage = getattr(message, "usage", None)
     server_use = getattr(usage, "server_tool_use", None) if usage else None
@@ -323,6 +362,14 @@ def _request_report(client, model: str, dossier: Dossier, context: str):
                 "type": "web_search_20260209",
                 "name": "web_search",
                 "max_uses": MAX_WEB_SEARCHES,
+                # Without this the tool defaults to running inside code
+                # execution ("dynamic filtering"), where the model reads
+                # filtered output rather than cited search results -- and no
+                # citations reach the text blocks at all. A live DOCU run
+                # confirmed it: six searches, zero citations. Direct calling
+                # puts more into context and costs a little more, which is the
+                # price of a report whose claims can be checked.
+                "allowed_callers": ["direct"],
             }
         ],
         messages=[{
@@ -390,15 +437,14 @@ def _warn_on_gaps(dossier: Dossier, report: Report) -> None:
         log.warning("%s report has no parseable grade", dossier.ticker)
 
     if report.searches and not report.sources:
-        # Searching without citing means the reader gets claims sourced from
-        # the open web with no way to check any of them. Worth saying out loud:
-        # it is the same silent-degradation shape as the empty price history.
         log.warning(
-            "%s: %d searches ran but no citations came back — the report will "
-            "carry no source links",
-            dossier.ticker, report.searches,
+            "%s: %d searches ran but no citations came back; falling back to "
+            "the %d pages the search tool returned",
+            dossier.ticker, report.searches, len(report.searched),
         )
 
-    log.info("%s report: grade %s, %d/%d sections, %d searches, %d sources",
+    log.info("%s report: grade %s, %d/%d sections, %d searches, "
+             "%d cited, %d searched",
              dossier.ticker, report.grade or "?", len(report.sections),
-             len(expected), report.searches, len(report.all_sources))
+             len(expected), report.searches, len(report.all_sources),
+             len(report.searched))

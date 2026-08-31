@@ -472,12 +472,17 @@ def render_research_text(report, dossier) -> str:
                 lines.append("")
 
     coverage = _coverage_bullets(dossier)
-    if coverage:
+    searched = [s for s in getattr(report, "searched", []) if s.url not in
+                {b.url for b in coverage}]
+    if coverage or searched:
         lines += ["=" * 68, "SOURCES USED", "=" * 68, ""]
         for bullet in coverage:
             lines.append(f"  - {bullet.text}")
             if bullet.url:
                 lines.append(f"    {bullet.url}")
+        for source in searched:
+            lines.append(f"  - {source.label}")
+            lines.append(f"    {source.url}")
         lines.append("")
 
     lines += ["-" * 68, RESEARCH_DISCLAIMER]
@@ -505,7 +510,11 @@ def render_research_html(report, dossier) -> str:
         )
 
     coverage = _coverage_bullets(dossier)
-    if coverage:
+    covered = {b.url for b in coverage}
+    # Pages the model searched but did not cite. Shown only as a fallback, so
+    # a report can never reach the reader with nothing to check it against.
+    searched = [s for s in getattr(report, "searched", []) if s.url not in covered]
+    if coverage or searched:
         items = "".join(
             '<li style="margin:0 0 6px;">'
             + (
@@ -515,6 +524,12 @@ def render_research_html(report, dossier) -> str:
             )
             + "</li>"
             for b in coverage
+        ) + "".join(
+            f'<li style="margin:0 0 6px;">'
+            f'<a href="{escape(src.url, quote=True)}" '
+            f'style="color:#1a4fa0;text-decoration:none;">{escape(src.label)}</a>'
+            f"</li>"
+            for src in searched
         )
         blocks.append(
             f'<h2 style="margin:26px 0 10px;font-size:12px;letter-spacing:.09em;'
