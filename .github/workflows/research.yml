@@ -34,7 +34,11 @@ jobs:
           args=()
           if [ -n "$TICKER" ]; then
             args+=(--ticker "$TICKER")
-            [ "$DOSSIER_ONLY" = "true" ] && args+=(--dossier-only)
+            # An explicit if, not `[ ... ] && ...`: steps run under `bash -e`,
+            # where a failing test as the last command aborts the step.
+            if [ "$DOSSIER_ONLY" = "true" ]; then
+              args+=(--dossier-only)
+            fi
           else
             args+=(--due)
           fi
