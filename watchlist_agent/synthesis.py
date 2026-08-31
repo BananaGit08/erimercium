@@ -100,12 +100,38 @@ it landed there.
 
 
 @dataclass
+class Source:
+    """One page the model cited, carried through to the reader.
+
+    Anthropic's web search documentation requires that citations be shown when
+    API output is displayed to an end user, and the reader wants them anyway:
+    a claim about analyst sentiment is worth much less if you cannot see who
+    said it.
+    """
+
+    url: str
+    title: str = ""
+
+    @property
+    def label(self) -> str:
+        """A short name for the link — the title, or the bare domain."""
+        if self.title:
+            return self.title
+        host = re.sub(r"^https?://(www\.)?", "", self.url)
+        return host.split("/")[0] or self.url
+
+
+@dataclass
 class Report:
     ticker: str
     kind: str
     grade: str = ""
     grade_reason: str = ""
     sections: dict[str, str] = field(default_factory=dict)
+    # Section label -> the pages cited in it. Kept per section rather than as
+    # one pile so a reader checking the valuation claim is not handed the
+    # leadership sources as well.
+    sources: dict[str, list[Source]] = field(default_factory=dict)
     raw: str = ""
     model: str = ""
     searches: int = 0
@@ -113,6 +139,17 @@ class Report:
     @property
     def summary(self) -> str:
         return self.sections.get("Summary", "")
+
+    @property
+    def all_sources(self) -> list[Source]:
+        seen: set[str] = set()
+        out: list[Source] = []
+        for sources in self.sources.values():
+            for source in sources:
+                if source.url not in seen:
+                    seen.add(source.url)
+                    out.append(source)
+        return out
 
 
 class SynthesisUnavailable(RuntimeError):
@@ -123,13 +160,17 @@ def available() -> bool:
     return bool(os.environ.get("ANTHROPIC_API_KEY", "").strip())
 
 
-def _parse(text: str, ticker: str, kind: str) -> Report:
+def _parse(text: str, ticker: str, kind: str) -> tuple[Report, dict[str, tuple[int, int]]]:
     """Split the model's output into sections and pull out the grade.
 
     Parsing is lenient on purpose: a missing heading costs one section, not the
     whole report, and the raw text is always kept so nothing is silently lost.
+
+    Also returns each section's character range in ``text``, which is what lets
+    a citation be matched to the section it was used in.
     """
     report = Report(ticker=ticker, kind=kind, raw=text)
+    ranges: dict[str, tuple[int, int]] = {}
     headings = [h for h, _ in SECTIONS] + ["GRADE"]
     pattern = re.compile(rf"^({'|'.join(headings)})\s*$", re.MULTILINE)
 
@@ -155,11 +196,59 @@ def _parse(text: str, ticker: str, kind: str) -> Report:
         else:
             label = dict(SECTIONS)[name]
             report.sections[label] = body
+            ranges[label] = (start, end)
 
     if not report.sections and not report.grade:
         # Format drifted entirely; keep the text rather than discard it.
         report.sections["Summary"] = text.strip()
-    return report
+        ranges["Summary"] = (0, len(text))
+    return report, ranges
+
+
+def _collect_sources(
+    blocks, ranges: dict[str, tuple[int, int]]
+) -> dict[str, list[Source]]:
+    """Match each cited page to the section whose prose cites it.
+
+    Citations hang off individual text blocks, but sections are found by
+    splitting the concatenated text, so the two have to be reconciled by
+    position. Recording where each block landed in that concatenation makes the
+    match exact rather than a guess: a block belongs to a section when their
+    character ranges overlap.
+    """
+    spans: list[tuple[int, int, list]] = []
+    position = 0
+    for block in blocks:
+        if getattr(block, "type", "") != "text":
+            continue
+        start, position = position, position + len(block.text)
+        citations = getattr(block, "citations", None) or []
+        if citations:
+            spans.append((start, position, citations))
+
+    sources: dict[str, list[Source]] = {}
+    for label, (low, high) in ranges.items():
+        seen: set[str] = set()
+        found: list[Source] = []
+        for start, end, citations in spans:
+            if start >= high or end <= low:
+                continue
+            for citation in citations:
+                # Web search yields web_search_result_location; web fetch and
+                # document citations have their own types. Anything carrying a
+                # url is a page the reader can open, so key on that rather than
+                # on an allowlist of citation types that would silently drop a
+                # kind we have not seen yet.
+                url = (getattr(citation, "url", "") or "").strip()
+                if not url or url in seen:
+                    continue
+                seen.add(url)
+                found.append(
+                    Source(url=url, title=(getattr(citation, "title", "") or "").strip())
+                )
+        if found:
+            sources[label] = found
+    return sources
 
 
 def synthesize(dossier: Dossier, model: str | None = None) -> Report:
@@ -207,7 +296,8 @@ def synthesize(dossier: Dossier, model: str | None = None) -> Report:
         )
 
     text = "".join(b.text for b in message.content if b.type == "text")
-    report = _parse(text, dossier.ticker, dossier.kind)
+    report, ranges = _parse(text, dossier.ticker, dossier.kind)
+    report.sources = _collect_sources(message.content, ranges)
     report.model = message.model
     usage = getattr(message, "usage", None)
     server_use = getattr(usage, "server_tool_use", None) if usage else None
@@ -263,7 +353,17 @@ def synthesize(dossier: Dossier, model: str | None = None) -> Report:
     if not report.grade:
         log.warning("%s report has no parseable grade", dossier.ticker)
 
-    log.info("%s report: grade %s, %d/%d sections, %d searches",
+    if report.searches and not report.sources:
+        # Searching without citing means the reader gets claims sourced from
+        # the open web with no way to check any of them. Worth saying out loud:
+        # it is the same silent-degradation shape as the empty price history.
+        log.warning(
+            "%s: %d searches ran but no citations came back — the report will "
+            "carry no source links",
+            dossier.ticker, report.searches,
+        )
+
+    log.info("%s report: grade %s, %d/%d sections, %d searches, %d sources",
              dossier.ticker, report.grade or "?", len(report.sections),
-             len(expected), report.searches)
+             len(expected), report.searches, len(report.all_sources))
     return report

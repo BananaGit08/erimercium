@@ -269,6 +269,35 @@ def research_subject(report, dossier) -> str:
     return f"{kind}: {dossier.title}{grade}"
 
 
+MAX_COVERAGE_NEWS = 6
+
+
+def _coverage_bullets(dossier) -> list:
+    """The filings and headlines the report was written from, best first.
+
+    These already carry URLs and already reach the model; until now they simply
+    never reached the reader, who was left to take the report's word for what
+    the company filed. Filings come first because a filing is the company
+    speaking rather than someone reporting on it.
+    """
+    news = sorted(dossier.news, key=lambda b: b.sort_key, reverse=True)
+    return list(dossier.filings) + news[:MAX_COVERAGE_NEWS]
+
+
+def _source_line_html(sources: list, muted: str) -> str:
+    if not sources:
+        return ""
+    links = " &middot; ".join(
+        f'<a href="{escape(s.url, quote=True)}" '
+        f'style="color:#1a4fa0;text-decoration:none;">{escape(s.label)}</a>'
+        for s in sources
+    )
+    return (
+        f'<p style="margin:9px 0 0;color:{muted};font-size:12px;'
+        f'line-height:1.5;">Sources: {links}</p>'
+    )
+
+
 def render_research_text(report, dossier) -> str:
     from .synthesis import SECTIONS
 
@@ -283,6 +312,20 @@ def render_research_text(report, dossier) -> str:
         body = report.sections.get(label)
         if body:
             lines += ["=" * 68, label.upper(), "=" * 68, "", body, ""]
+            for source in report.sources.get(label, []):
+                lines.append(f"    source: {source.label} — {source.url}")
+            if report.sources.get(label):
+                lines.append("")
+
+    coverage = _coverage_bullets(dossier)
+    if coverage:
+        lines += ["=" * 68, "SOURCES USED", "=" * 68, ""]
+        for bullet in coverage:
+            lines.append(f"  - {bullet.text}")
+            if bullet.url:
+                lines.append(f"    {bullet.url}")
+        lines.append("")
+
     lines += ["-" * 68, RESEARCH_DISCLAIMER]
     return "\n".join(lines)
 
@@ -318,6 +361,27 @@ def render_research_html(report, dossier) -> str:
             f'text-transform:uppercase;color:{muted};font-weight:700;'
             f'border-bottom:1px solid #e5e7eb;padding-bottom:6px;">{escape(label)}</h2>'
             f"{rendered}"
+            + _source_line_html(report.sources.get(label, []), muted)
+        )
+
+    coverage = _coverage_bullets(dossier)
+    if coverage:
+        items = "".join(
+            '<li style="margin:0 0 6px;">'
+            + (
+                f'<a href="{escape(b.url, quote=True)}" '
+                f'style="color:#1a4fa0;text-decoration:none;">{escape(b.text)}</a>'
+                if b.url else escape(b.text)
+            )
+            + "</li>"
+            for b in coverage
+        )
+        blocks.append(
+            f'<h2 style="margin:26px 0 10px;font-size:12px;letter-spacing:.09em;'
+            f'text-transform:uppercase;color:{muted};font-weight:700;'
+            f'border-bottom:1px solid #e5e7eb;padding-bottom:6px;">Sources used</h2>'
+            f'<ul style="margin:0;padding-left:20px;font-size:13px;'
+            f'line-height:1.5;color:#374151;">{items}</ul>'
         )
 
     grade_block = ""
