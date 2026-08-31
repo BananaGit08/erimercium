@@ -12,7 +12,7 @@ what is happening to them.
 |---|---|---|
 | 1 | Price digest — per-ticker move detection, email at 4:30pm ET | **Done** |
 | 2 | Company news + SEC filings (10-Q / 10-K / 8-K), materiality-filtered | **Done** |
-| 3 | Deep-dive research reports with a letter grade | Not started |
+| 3 | Research reports: baseline, pre-earnings, event-triggered | Data + scheduling done; writing needs an API key |
 | 4 | Formatting, source links, filter tuning | Not started |
 
 ## Setup
@@ -213,6 +213,67 @@ major takeaway" needs a model reading the article.
 Tickers with no US filings (foreign private issuers like `ASML` and `BABA`,
 ETFs like `FBTC`, OTC symbols like `HYMLF`) simply have no CIK in EDGAR and are
 skipped; crypto pairs have neither news feed nor filings.
+
+## Research reports
+
+Reports are generated on three triggers, not on price moves:
+
+| Trigger | When |
+|---|---|
+| **Baseline** | Once per holding, ever. Batched a few per run rather than 100 at once. |
+| **Pre-earnings** | 7 days before a company reports, from Finnhub's free earnings calendar |
+| **Event** | An 8-K whose item codes say the picture changed |
+
+Price moves deliberately do not trigger a report. Move-triggering is unbounded
+— one volatile session flagged 33 of 100 tickers — and it fires after the fact.
+Earnings-triggering is predictable (~400/year) and lands while the information
+is still actionable.
+
+**Two scheduling guarantees**, both tested against the awkward cases:
+
+- Earnings reports are keyed by **fiscal period** (`2026Q3`), never by date.
+  Companies reschedule constantly; keying on the date would send a second
+  report for the same quarter every time one moved.
+- The lead window is **one-sided**, so a date that slips out of range is caught
+  again when it returns rather than being skipped.
+
+State lives in `reports_sent.json`, committed back between runs since Actions
+runs share no storage. Event triggers key on SEC accession number, so a
+re-examined filing cannot produce a duplicate.
+
+**Event triggers read 8-K item codes, not headlines.** A CEO departure is Item
+5.02 whether or not anyone wrote about it, and filing it is mandatory. Item
+2.02 (results of operations) is deliberately excluded — earnings are already
+covered by the scheduled cadence, and including it would fire a duplicate
+report every quarter for every holding.
+
+### What a report is built from
+
+Everything except the writing runs on free public data and needs no API key:
+
+| Source | Supplies |
+|---|---|
+| SEC XBRL company facts | Quarterly revenue, margin and leverage trends |
+| Finnhub basic financials | P/E, P/S, P/B, margins, 52-week range, beta |
+| Finnhub peers | Peer set, with P/E fetched for each |
+| Finnhub earnings calendar | Date, consensus EPS and revenue estimates |
+| Finnhub recommendation trends | Analyst rating mix and its direction |
+| SEC submissions | Recent filings, classified by form and item code |
+| Finnhub company news | Filtered headlines with source links |
+
+XBRL is inconsistent across filers — NKE does not tag `OperatingIncomeLoss` at
+all — so each metric tries several concepts and the margin series falls through
+operating → gross → net, carrying the name of whichever line it used.
+
+The dossier records what it could **not** get and passes that to the writer as
+an instruction to state the gap. Analyst price targets are permanently on that
+list, being a premium endpoint. A report that says "price target data
+unavailable" is worth more than one that leaves the reader assuming the
+sentiment read was complete.
+
+`python -m watchlist_agent.deep_dive --due` shows what the scheduler would
+generate today; `--ticker X --dossier-only` prints the gathered data without
+writing anything.
 
 ## Disclaimer
 
