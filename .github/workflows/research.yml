@@ -11,6 +11,14 @@ on:
         description: "Gather data only, skip the written report (no API key needed)"
         type: boolean
         default: true
+      run_due:
+        description: "Generate and email everything due today"
+        type: boolean
+        default: false
+      baseline_limit:
+        description: "Max first-time reports per run"
+        type: string
+        default: "3"
 
 jobs:
   research:
@@ -28,14 +36,22 @@ jobs:
         env:
           FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          DIGEST_RECIPIENT: ${{ vars.DIGEST_RECIPIENT || 'christian.na@icloud.com' }}
           TICKER: ${{ inputs.ticker }}
           DOSSIER_ONLY: ${{ inputs.dossier_only }}
+          RUN_DUE: ${{ inputs.run_due }}
+          BASELINE_LIMIT: ${{ inputs.baseline_limit }}
         run: |
           args=()
-          if [ -n "$TICKER" ]; then
+          if [ "$RUN_DUE" = "true" ]; then
+            args+=(--run --baseline-limit "${BASELINE_LIMIT:-3}")
+            if [ "$DOSSIER_ONLY" = "true" ]; then
+              args+=(--dossier-only)
+            fi
+          elif [ -n "$TICKER" ]; then
             args+=(--ticker "$TICKER")
-            # An explicit if, not `[ ... ] && ...`: steps run under `bash -e`,
-            # where a failing test as the last command aborts the step.
             if [ "$DOSSIER_ONLY" = "true" ]; then
               args+=(--dossier-only)
             fi
@@ -43,3 +59,16 @@ jobs:
             args+=(--due)
           fi
           python -m watchlist_agent.deep_dive "${args[@]}"
+
+      - name: Record what was sent
+        if: ${{ inputs.run_due == true && inputs.dossier_only != true }}
+        run: |
+          if git diff --quiet -- reports_sent.json; then
+            echo "no new reports recorded"
+            exit 0
+          fi
+          git config user.name "erimercium-agent"
+          git config user.email "christian@banananorth.com"
+          git add reports_sent.json
+          git commit -m "Record research reports sent on $(date -u +%Y-%m-%d)"
+          git push

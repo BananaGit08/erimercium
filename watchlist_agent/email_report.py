@@ -244,3 +244,104 @@ def send_email(subject: str, text_body: str, html_body: str) -> None:
         smtp.send_message(message)
 
     log.info("sent %r to %s", subject, recipient)
+
+
+# --- research reports ------------------------------------------------------
+
+GRADE_COLORS = {
+    "A": "#0f7b3f", "B": "#3f7b0f", "C": "#8a6d1f", "D": "#b3591e", "F": "#b3261e",
+}
+
+RESEARCH_DISCLAIMER = (
+    "This report is a synthesis of public information for research purposes, "
+    "not financial advice. Predictions about leadership changes or stock "
+    "movement are inherently uncertain."
+)
+
+
+def research_subject(report, dossier) -> str:
+    grade = f" — {report.grade}" if report.grade else ""
+    kind = {
+        "baseline": "Research",
+        "earnings": "Pre-earnings",
+        "event": "Update",
+    }.get(report.kind, "Research")
+    return f"{kind}: {dossier.title}{grade}"
+
+
+def render_research_text(report, dossier) -> str:
+    from .synthesis import SECTIONS
+
+    lines = [
+        f"{dossier.title.upper()}",
+        f"{report.kind.title()} report" + (f" — {dossier.reason}" if dossier.reason else ""),
+        "",
+    ]
+    if report.grade:
+        lines += [f"GRADE: {report.grade}", report.grade_reason, ""]
+    for _, label in SECTIONS:
+        body = report.sections.get(label)
+        if body:
+            lines += ["=" * 68, label.upper(), "=" * 68, "", body, ""]
+    lines += ["-" * 68, RESEARCH_DISCLAIMER]
+    return "\n".join(lines)
+
+
+def render_research_html(report, dossier) -> str:
+    from .synthesis import SECTIONS
+
+    muted = "#6b7280"
+    grade_color = GRADE_COLORS.get(report.grade[:1] if report.grade else "", muted)
+
+    blocks = []
+    for _, label in SECTIONS:
+        body = report.sections.get(label)
+        if not body:
+            continue
+        if body.lstrip().startswith("- "):
+            items = "".join(
+                f'<li style="margin:0 0 7px;">{escape(line.lstrip("- ").strip())}</li>'
+                for line in body.splitlines()
+                if line.strip().startswith("- ")
+            )
+            rendered = (
+                f'<ul style="margin:0;padding-left:20px;font-size:14px;'
+                f'line-height:1.55;">{items}</ul>'
+            )
+        else:
+            rendered = (
+                f'<p style="margin:0;font-size:14px;line-height:1.6;">'
+                f"{escape(body)}</p>"
+            )
+        blocks.append(
+            f'<h2 style="margin:26px 0 10px;font-size:12px;letter-spacing:.09em;'
+            f'text-transform:uppercase;color:{muted};font-weight:700;'
+            f'border-bottom:1px solid #e5e7eb;padding-bottom:6px;">{escape(label)}</h2>'
+            f"{rendered}"
+        )
+
+    grade_block = ""
+    if report.grade:
+        grade_block = (
+            f'<div style="margin:18px 0 0;padding:14px 16px;border-radius:8px;'
+            f'background:#f6f7f9;border-left:4px solid {grade_color};">'
+            f'<div style="font-size:26px;font-weight:700;color:{grade_color};'
+            f'line-height:1;">{escape(report.grade)}</div>'
+            f'<p style="margin:8px 0 0;font-size:13.5px;line-height:1.5;">'
+            f"{escape(report.grade_reason)}</p></div>"
+        )
+
+    return f"""\
+<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;
+            max-width:660px;margin:0 auto;padding:28px 24px;color:#111827;">
+  <h1 style="margin:0 0 4px;font-size:21px;font-weight:700;">{escape(dossier.title)}</h1>
+  <p style="margin:0;color:{muted};font-size:13px;">
+    {escape(report.kind.title())} report{escape(" — " + dossier.reason) if dossier.reason else ""}
+  </p>
+  {grade_block}
+  {"".join(blocks)}
+  <p style="margin:30px 0 0;padding-top:14px;border-top:1px solid #e5e7eb;
+            color:{muted};font-size:12px;line-height:1.5;">
+    {escape(RESEARCH_DISCLAIMER)}
+  </p>
+</div>"""
