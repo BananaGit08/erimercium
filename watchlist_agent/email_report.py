@@ -8,7 +8,7 @@ from datetime import datetime
 from email.message import EmailMessage
 from html import escape
 
-from .config import gmail_address, gmail_app_password, recipient_address
+from .config import gmail_address, gmail_app_password, now_et, recipient_address
 from .materiality import Bullet
 from .movers import Mover
 from .prices import QuoteFailure
@@ -269,6 +269,50 @@ def research_subject(report, dossier) -> str:
     return f"{kind}: {dossier.title}{grade}"
 
 
+def _key_figures(dossier) -> list[tuple[str, str]]:
+    """The handful of numbers a buy/sell/hold call actually turns on.
+
+    All of these already exist in the dossier and all of them were previously
+    reachable only by reading the prose and hoping the model had mentioned
+    them. Anything unavailable is left out rather than shown as a blank: a
+    missing row says less than a row saying nothing.
+    """
+    figures: list[tuple[str, str]] = []
+    quote = getattr(dossier, "quote", None)
+    if quote and quote.current:
+        figures.append((
+            "Price",
+            f"${quote.current:,.2f}"
+            + (f"  ({quote.change_pct:+.2f}%)" if quote.previous_close else ""),
+        ))
+
+    metrics = getattr(getattr(dossier, "market", None), "metrics", None) or {}
+
+    def metric(key: str) -> float | None:
+        value = metrics.get(key)
+        return value if isinstance(value, (int, float)) else None
+
+    if (pe := metric("peTTM")) is not None:
+        figures.append(("P/E (TTM)", f"{pe:,.1f}"))
+    if (growth := metric("revenueGrowthTTMYoy")) is not None:
+        figures.append(("Revenue growth YoY", f"{growth:+.1f}%"))
+    if (margin := metric("operatingMarginTTM")) is not None:
+        figures.append(("Operating margin", f"{margin:.1f}%"))
+    low, high = metric("52WeekLow"), metric("52WeekHigh")
+    if low is not None and high is not None:
+        figures.append(("52-week range", f"${low:,.2f} – ${high:,.2f}"))
+
+    earnings = getattr(dossier, "earnings", None)
+    if earnings:
+        figures.append((
+            "Reports",
+            f"{earnings.date:%b %d} ({earnings.period})"
+            + (f", cons. EPS {earnings.eps_estimate:g}"
+               if earnings.eps_estimate is not None else ""),
+        ))
+    return figures
+
+
 MAX_COVERAGE_NEWS = 6
 
 
@@ -282,6 +326,57 @@ def _coverage_bullets(dossier) -> list:
     """
     news = sorted(dossier.news, key=lambda b: b.sort_key, reverse=True)
     return list(dossier.filings) + news[:MAX_COVERAGE_NEWS]
+
+
+def _section_html(body: str) -> str:
+    """Render one section, keeping prose that sits alongside bullets.
+
+    The previous rule was "if it starts with a dash, keep only the dashed
+    lines", which quietly deleted any sentence the model wrote around its
+    bullets -- a closing line naming which filing the figures came from would
+    simply not appear, and nothing in the email showed that anything was
+    missing. Bullets and paragraphs are now both rendered, and a line that
+    continues a wrapped bullet is folded back into it rather than promoted to
+    a paragraph of its own.
+    """
+    out: list[str] = []
+    bullets: list[str] = []
+    para: list[str] = []
+
+    def flush_bullets() -> None:
+        if bullets:
+            items = "".join(
+                f'<li style="margin:0 0 7px;">{escape(b)}</li>' for b in bullets
+            )
+            out.append(
+                f'<ul style="margin:0 0 10px;padding-left:20px;font-size:14px;'
+                f'line-height:1.55;">{items}</ul>'
+            )
+            bullets.clear()
+
+    def flush_para() -> None:
+        if para:
+            out.append(
+                f'<p style="margin:0 0 10px;font-size:14px;line-height:1.6;">'
+                f'{escape(" ".join(para))}</p>'
+            )
+            para.clear()
+
+    for raw in body.splitlines():
+        line = raw.strip()
+        if not line:
+            flush_bullets()
+            flush_para()
+        elif line.startswith("- ") or line.startswith("* "):
+            flush_para()
+            bullets.append(line[2:].strip())
+        elif bullets:
+            bullets[-1] += " " + line
+        else:
+            para.append(line)
+    flush_bullets()
+    flush_para()
+    return "".join(out)
 
 
 def _source_line_html(sources: list, muted: str) -> str:
@@ -304,8 +399,15 @@ def render_research_text(report, dossier) -> str:
     lines = [
         f"{dossier.title.upper()}",
         f"{report.kind.title()} report" + (f" — {dossier.reason}" if dossier.reason else ""),
+        f"{now_et():%A, %B %d, %Y}",
         "",
     ]
+    figures = _key_figures(dossier)
+    if figures:
+        width = max(len(label) for label, _ in figures)
+        for label, value in figures:
+            lines.append(f"  {label:<{width}}  {value}")
+        lines.append("")
     if report.grade:
         lines += [f"GRADE: {report.grade}", report.grade_reason, ""]
     for _, label in SECTIONS:
@@ -341,21 +443,7 @@ def render_research_html(report, dossier) -> str:
         body = report.sections.get(label)
         if not body:
             continue
-        if body.lstrip().startswith("- "):
-            items = "".join(
-                f'<li style="margin:0 0 7px;">{escape(line.lstrip("- ").strip())}</li>'
-                for line in body.splitlines()
-                if line.strip().startswith("- ")
-            )
-            rendered = (
-                f'<ul style="margin:0;padding-left:20px;font-size:14px;'
-                f'line-height:1.55;">{items}</ul>'
-            )
-        else:
-            rendered = (
-                f'<p style="margin:0;font-size:14px;line-height:1.6;">'
-                f"{escape(body)}</p>"
-            )
+        rendered = _section_html(body)
         blocks.append(
             f'<h2 style="margin:26px 0 10px;font-size:12px;letter-spacing:.09em;'
             f'text-transform:uppercase;color:{muted};font-weight:700;'
@@ -384,6 +472,26 @@ def render_research_html(report, dossier) -> str:
             f'line-height:1.5;color:#374151;">{items}</ul>'
         )
 
+    figures = _key_figures(dossier)
+    figures_block = ""
+    if figures:
+        cells = "".join(
+            f'<td style="padding:9px 16px 9px 0;vertical-align:top;">'
+            f'<div style="color:{muted};font-size:11px;letter-spacing:.05em;'
+            f'text-transform:uppercase;">{escape(label)}</div>'
+            f'<div style="font-size:15px;font-weight:600;white-space:nowrap;">'
+            f"{escape(value)}</div></td>"
+            for label, value in figures
+        )
+        # One row of cells rather than a grid: Outlook and Gmail both render a
+        # plain table reliably, and a horizontal strip degrades to a readable
+        # stack on a phone where a float or flex layout would not.
+        figures_block = (
+            '<table role="presentation" cellpadding="0" cellspacing="0" '
+            'style="border-collapse:collapse;margin:16px 0 0;">'
+            f"<tr>{cells}</tr></table>"
+        )
+
     grade_block = ""
     if report.grade:
         grade_block = (
@@ -401,7 +509,9 @@ def render_research_html(report, dossier) -> str:
   <h1 style="margin:0 0 4px;font-size:21px;font-weight:700;">{escape(dossier.title)}</h1>
   <p style="margin:0;color:{muted};font-size:13px;">
     {escape(report.kind.title())} report{escape(" — " + dossier.reason) if dossier.reason else ""}
+    &middot; {now_et():%B %d, %Y}
   </p>
+  {figures_block}
   {grade_block}
   {"".join(blocks)}
   <p style="margin:30px 0 0;padding-top:14px;border-top:1px solid #e5e7eb;
