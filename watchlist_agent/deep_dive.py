@@ -64,11 +64,14 @@ def show_due(baseline_limit: int) -> int:
 
 def _generate_and_send(request: ReportRequest, state: ReportState, dry_run: bool) -> bool:
     """One report: gather, write, send, record. Returns whether it was sent."""
-    dossier = build(request.ticker, kind=request.kind, reason=request.reason)
     try:
+        # Gathering is inside the guard too: an unreachable data source is at
+        # least as likely as a synthesis failure, and one bad ticker must not
+        # take down the rest of the batch.
+        dossier = build(request.ticker, kind=request.kind, reason=request.reason)
         report = synthesize(dossier)
     except Exception as exc:  # noqa: BLE001 - one failure must not stop the batch
-        log.error("%s report failed: %s", request.ticker, exc)
+        log.error("%s report failed: %s: %s", request.ticker, type(exc).__name__, exc)
         return False
 
     subject = research_subject(report, dossier)
