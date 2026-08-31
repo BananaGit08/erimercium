@@ -18,6 +18,7 @@ from datetime import date
 import requests
 
 from .config import FUNDAMENTALS_QUARTERS, HTTP_TIMEOUT_SECONDS, SEC_DATA_BASE
+from .filings import throttle
 
 log = logging.getLogger(__name__)
 
@@ -36,7 +37,11 @@ CONCEPTS: dict[str, list[str]] = {
         "IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest",
         "IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments",
     ],
-    "net_income": ["NetIncomeLoss", "ProfitLoss"],
+    "net_income": [
+        "NetIncomeLoss",
+        "ProfitLoss",
+        "NetIncomeLossAvailableToCommonStockholdersBasic",
+    ],
     "gross_profit": ["GrossProfit"],
 }
 # Point-in-time balances rather than period flows, so they are read differently.
@@ -44,10 +49,15 @@ BALANCE_CONCEPTS: dict[str, list[str]] = {
     "total_debt": [
         "LongTermDebtNoncurrent",
         "LongTermDebt",
+        "LongTermDebtAndCapitalLeaseObligations",
         "DebtLongtermAndShorttermCombinedAmount",
+        "LongTermDebtCurrent",
     ],
     "equity": ["StockholdersEquity", "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest"],
-    "cash": ["CashAndCashEquivalentsAtCarryingValue"],
+    "cash": [
+        "CashAndCashEquivalentsAtCarryingValue",
+        "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents",
+    ],
 }
 
 QUARTER_MIN_DAYS, QUARTER_MAX_DAYS = 80, 100
@@ -64,6 +74,7 @@ class Fundamentals:
     equity: float | None = None
     cash: float | None = None
     missing: list[str] = field(default_factory=list)
+    problems: list[str] = field(default_factory=list)
 
     def margin_series(self) -> tuple[str, dict[str, float]]:
         """The best available margin trend, and what it is called.
@@ -109,16 +120,37 @@ def _concept_url(cik: str, tag: str) -> str:
     return f"{SEC_DATA_BASE}/api/xbrl/companyconcept/CIK{cik}/us-gaap/{tag}.json"
 
 
-def _fetch_concept(session: requests.Session, cik: str, tag: str) -> list[dict] | None:
+def _fetch_concept(
+    session: requests.Session, cik: str, tag: str, problems: list[str] | None = None
+) -> list[dict] | None:
+    """One XBRL concept, or None.
+
+    A metric can go missing for two very different reasons: the company does
+    not use that tag (a 404, entirely normal), or SEC refused the request. The
+    second used to look exactly like the first, which is how a rate-limited run
+    reported a company as having no net income.
+    """
+    throttle()  # SEC allows 10 requests/second across all endpoints.
     try:
         resp = session.get(_concept_url(cik, tag), timeout=HTTP_TIMEOUT_SECONDS)
-    except requests.RequestException:
+    except requests.RequestException as exc:
+        log.warning("SEC request failed for %s: %s", tag, exc)
+        if problems is not None:
+            problems.append(f"{tag}: {exc}")
         return None
+    if resp.status_code == 404:
+        return None  # This company simply does not report that concept.
     if not resp.ok:
-        return None  # 404 simply means this company does not use that tag.
+        log.warning("SEC HTTP %s for %s (not a missing tag)", resp.status_code, tag)
+        if problems is not None:
+            problems.append(f"{tag}: HTTP {resp.status_code}")
+        return None
     try:
         return resp.json().get("units", {}).get("USD", [])
     except (ValueError, AttributeError):
+        log.warning("SEC payload unusable for %s", tag)
+        if problems is not None:
+            problems.append(f"{tag}: unparseable response")
         return None
 
 
@@ -163,7 +195,7 @@ def fetch(
 
     for metric, tags in CONCEPTS.items():
         for tag in tags:
-            entries = _fetch_concept(session, cik, tag)
+            entries = _fetch_concept(session, cik, tag, result.problems)
             if entries:
                 series = _quarterly(entries, quarters)
                 if series:
@@ -174,7 +206,7 @@ def fetch(
 
     for metric, tags in BALANCE_CONCEPTS.items():
         for tag in tags:
-            entries = _fetch_concept(session, cik, tag)
+            entries = _fetch_concept(session, cik, tag, result.problems)
             if entries:
                 value = _latest_balance(entries)
                 if value is not None:
@@ -184,9 +216,12 @@ def fetch(
             result.missing.append(metric)
 
     log.info(
-        "%s fundamentals: %d revenue quarters%s",
+        "%s fundamentals: %d revenue quarters%s%s",
         ticker,
         len(result.revenue),
         f", missing {', '.join(result.missing)}" if result.missing else "",
+        f", {len(result.problems)} request problems" if result.problems else "",
     )
+    if result.problems:
+        log.warning("%s SEC request problems: %s", ticker, "; ".join(result.problems[:5]))
     return result

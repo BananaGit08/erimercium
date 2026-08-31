@@ -48,6 +48,15 @@ strategic changes they drove.
 Rules that matter more than style:
 - Never invent a number. Every figure must come from the dossier or a source \
 you searched. If something is unavailable, say so plainly in one clause.
+- Write every sentence yourself. Sourcing a figure does not mean pasting the \
+sentence it came in: quoting headlines or press-release phrasing inline \
+produces bullets that do not parse as English. Take the number, state it in \
+your own words, and name the source only where it matters ("JPMorgan cut it \
+to Underweight"). Quote directly only when the exact wording is the point, \
+such as a phrase from a company statement, and keep it under fifteen words.
+- Each bullet is one complete sentence, or two short ones. If a bullet needs \
+a colon, a parenthetical and a subordinate clause to hold itself together, it \
+is carrying two ideas and should be two bullets or one shorter one.
 - The dossier lists known data gaps. State them; do not paper over them.
 - Distinguish what happened from what it might mean, and say which is which.
 - No hedging filler. "Margins fell for three straight quarters" beats \

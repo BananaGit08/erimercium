@@ -35,7 +35,7 @@ _cik_cache: dict[str, tuple[str, str]] | None = None
 _last_request = 0.0
 
 
-def _throttle() -> None:
+def throttle() -> None:
     """SEC asks for at most 10 requests/second across all endpoints."""
     global _last_request
     interval = 1.0 / SEC_MAX_RPS
@@ -62,7 +62,7 @@ def _load_cik_map(session: requests.Session) -> dict[str, tuple[str, str]]:
             return _cik_cache
         mapping: dict[str, tuple[str, str]] = {}
         try:
-            _throttle()
+            throttle()
             resp = session.get(SEC_TICKERS_URL, timeout=HTTP_TIMEOUT_SECONDS)
             if resp.ok:
                 for row in resp.json().values():
@@ -91,7 +91,7 @@ def fetch_filings(
     cik, _ = entry
 
     try:
-        _throttle()
+        throttle()
         resp = session.get(
             f"{SEC_DATA_BASE}/submissions/CIK{cik}.json", timeout=HTTP_TIMEOUT_SECONDS
         )

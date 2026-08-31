@@ -118,6 +118,13 @@ def _get(session: requests.Session, path: str, status: dict | None = None, **par
     try:
         return resp.json()
     except ValueError:
+        # A 200 whose body is not JSON. This is the path that silently
+        # produced "no analyst ratings" for PYPL and NKE, so record what
+        # actually came back rather than returning a bare None.
+        body = resp.text[:160].replace("\n", " ")
+        log.warning("finnhub %s returned non-JSON: %r", path, body)
+        if status is not None:
+            status["note"] = f"200 but non-JSON body: {body!r}"
         return None
 
 
