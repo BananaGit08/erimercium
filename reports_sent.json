@@ -2,7 +2,8 @@
   "_comment": "Research reports already sent. Earnings reports are keyed by fiscal period so a rescheduled date does not cause a repeat; event reports are keyed by SEC accession number.",
   "baseline": {
     "AAPL": "2026-08-31",
-    "ABNB": "2026-08-31"
+    "ABNB": "2026-08-31",
+    "ADBE": "2026-08-31"
   },
   "earnings": {
     "ASAN": {
