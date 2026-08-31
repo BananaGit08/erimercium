@@ -88,6 +88,7 @@ class MarketData:
     metrics: dict[str, float] = field(default_factory=dict)
     peers: list[str] = field(default_factory=list)
     recommendations: Recommendations = field(default_factory=Recommendations)
+    ratings_note: str = ""  # why ratings are missing, when they are
 
     def labelled_metrics(self) -> dict[str, float]:
         return {
@@ -97,7 +98,7 @@ class MarketData:
         }
 
 
-def _get(session: requests.Session, path: str, **params):
+def _get(session: requests.Session, path: str, status: dict | None = None, **params):
     params["token"] = finnhub_api_key()
     try:
         resp = session.get(
@@ -105,10 +106,14 @@ def _get(session: requests.Session, path: str, **params):
         )
     except requests.RequestException as exc:
         log.warning("finnhub %s failed: %s", path, exc)
+        if status is not None:
+            status["note"] = f"request failed: {exc}"
         return None
     if not resp.ok:
         # 403 here means the endpoint is premium on this key.
-        log.warning("finnhub %s HTTP %s", path, resp.status_code)
+        log.warning("finnhub %s HTTP %s: %s", path, resp.status_code, resp.text[:160])
+        if status is not None:
+            status["note"] = f"HTTP {resp.status_code} {resp.text[:120]}"
         return None
     try:
         return resp.json()
@@ -129,14 +134,13 @@ def fetch(session: requests.Session, ticker: str) -> MarketData:
         # Finnhub includes the subject company in its own peer list.
         data.peers = [p for p in peers if p and p.upper() != ticker.upper()][:6]
 
-    trends = _get(session, "stock/recommendation-trends", symbol=ticker)
+    status: dict = {}
+    trends = _get(session, "stock/recommendation-trends", status=status, symbol=ticker)
     if not (isinstance(trends, list) and trends):
-        log.warning(
-            "%s ratings unavailable: endpoint returned %s %r",
-            ticker,
-            type(trends).__name__,
-            str(trends)[:200],
+        data.ratings_note = status.get("note") or (
+            f"endpoint returned {type(trends).__name__} {str(trends)[:120]}"
         )
+        log.warning("%s ratings unavailable: %s", ticker, data.ratings_note)
     if isinstance(trends, list) and trends:
         data.recommendations = Recommendations(
             months=sorted(trends, key=lambda m: m.get("period", ""), reverse=True)[:4]

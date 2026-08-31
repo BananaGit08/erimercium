@@ -77,7 +77,10 @@ def build(
         if not dossier.market.metrics:
             dossier.note_gap("no valuation metrics available")
         if not dossier.market.recommendations.months:
-            dossier.note_gap("no analyst ratings available")
+            dossier.note_gap(
+                "no analyst ratings available"
+                + (f" — {dossier.market.ratings_note}" if dossier.market.ratings_note else "")
+            )
         # Price targets are a premium Finnhub endpoint, so sentiment is
         # rating-mix only. Say so rather than let a reader assume otherwise.
         dossier.note_gap("analyst price targets unavailable (premium data)")
