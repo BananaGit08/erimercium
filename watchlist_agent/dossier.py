@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 
 import requests
 
+from .config import RESEARCH_FILINGS_DAYS, RESEARCH_NEWS_DAYS
 from .earnings import EarningsEvent
 from .filings import company_name, fetch_filings, sec_session
 from .fundamentals import Fundamentals, fetch as fetch_fundamentals
@@ -84,12 +85,14 @@ def build(
         if dossier.market.peers:
             dossier.peer_pe = peer_comparison(finnhub, dossier.market.peers)
 
-        dossier.news = fetch_news(finnhub, ticker, dossier.company)
+        dossier.news = fetch_news(
+            finnhub, ticker, dossier.company, days=RESEARCH_NEWS_DAYS
+        )
         if not dossier.news:
             dossier.note_gap("no material news in the recent window")
 
         if dossier.company:
-            dossier.filings = fetch_filings(sec, ticker)
+            dossier.filings = fetch_filings(sec, ticker, days=RESEARCH_FILINGS_DAYS)
             from .filings import _load_cik_map  # noqa: PLC0415 - internal reuse
 
             entry = _load_cik_map(sec).get(ticker.upper())
@@ -129,11 +132,12 @@ def to_prompt_context(dossier: Dossier) -> str:
     if dossier.fundamentals:
         f = dossier.fundamentals
         lines += ["", "QUARTERLY FUNDAMENTALS (from SEC filings, newest first):"]
+        margin_label, margins = f.margin_series()
         for period in sorted(f.revenue, reverse=True):
-            margin = f.operating_margin().get(period)
+            margin = margins.get(period)
             lines.append(
                 f"  {period}: revenue ${f.revenue[period]:,.0f}"
-                + (f", operating margin {margin:.1f}%" if margin is not None else "")
+                + (f", {margin_label} {margin:.1f}%" if margin is not None else "")
             )
         growth = f.revenue_growth_yoy()
         if growth is not None:

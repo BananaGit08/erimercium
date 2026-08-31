@@ -130,6 +130,13 @@ def fetch(session: requests.Session, ticker: str) -> MarketData:
         data.peers = [p for p in peers if p and p.upper() != ticker.upper()][:6]
 
     trends = _get(session, "stock/recommendation-trends", symbol=ticker)
+    if not (isinstance(trends, list) and trends):
+        log.warning(
+            "%s ratings unavailable: endpoint returned %s %r",
+            ticker,
+            type(trends).__name__,
+            str(trends)[:200],
+        )
     if isinstance(trends, list) and trends:
         data.recommendations = Recommendations(
             months=sorted(trends, key=lambda m: m.get("period", ""), reverse=True)[:4]

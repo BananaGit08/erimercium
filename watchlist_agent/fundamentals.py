@@ -29,7 +29,13 @@ CONCEPTS: dict[str, list[str]] = {
         "RevenueFromContractWithCustomerIncludingAssessedTax",
         "SalesRevenueNet",
     ],
-    "operating_income": ["OperatingIncomeLoss"],
+    # NKE, among others, does not report OperatingIncomeLoss. Fall through to
+    # the pre-tax line, which is close enough to trend a margin on.
+    "operating_income": [
+        "OperatingIncomeLoss",
+        "IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest",
+        "IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments",
+    ],
     "net_income": ["NetIncomeLoss", "ProfitLoss"],
     "gross_profit": ["GrossProfit"],
 }
@@ -59,13 +65,27 @@ class Fundamentals:
     cash: float | None = None
     missing: list[str] = field(default_factory=list)
 
-    def operating_margin(self) -> dict[str, float]:
-        """Operating margin per quarter, only where both inputs exist."""
-        return {
-            period: self.operating_income[period] / self.revenue[period] * 100
-            for period in self.revenue
-            if period in self.operating_income and self.revenue[period]
-        }
+    def margin_series(self) -> tuple[str, dict[str, float]]:
+        """The best available margin trend, and what it is called.
+
+        Companies tag profit lines inconsistently, so rather than report
+        nothing when OperatingIncomeLoss is absent, fall back through gross
+        and net profit. Naming which one is in use matters -- a reader
+        comparing "margin" across reports needs to know it is the same line.
+        """
+        for label, series in (
+            ("operating margin", self.operating_income),
+            ("gross margin", self.gross_profit),
+            ("net margin", self.net_income),
+        ):
+            margins = {
+                period: series[period] / self.revenue[period] * 100
+                for period in self.revenue
+                if period in series and self.revenue[period]
+            }
+            if margins:
+                return label, margins
+        return "margin", {}
 
     def revenue_growth_yoy(self) -> float | None:
         """Most recent quarter against the same quarter a year earlier."""

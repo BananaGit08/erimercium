@@ -79,7 +79,9 @@ def _load_cik_map(session: requests.Session) -> dict[str, tuple[str, str]]:
         return mapping
 
 
-def fetch_filings(session: requests.Session, ticker: str) -> list[Bullet]:
+def fetch_filings(
+    session: requests.Session, ticker: str, days: int = FILINGS_LOOKBACK_DAYS
+) -> list[Bullet]:
     """Material 10-K / 10-Q / 8-K filings for one ticker in the lookback window."""
     entry = _load_cik_map(session).get(ticker.upper())
     if not entry:
@@ -110,7 +112,7 @@ def fetch_filings(session: requests.Session, ticker: str) -> list[Bullet]:
     items = recent.get("items", [])
     accessions = recent.get("accessionNumber", [])
     docs = recent.get("primaryDocument", [])
-    cutoff = date.today() - timedelta(days=FILINGS_LOOKBACK_DAYS)
+    cutoff = date.today() - timedelta(days=days)
 
     bullets: list[Bullet] = []
     for i, form in enumerate(forms):

@@ -19,16 +19,25 @@ log = logging.getLogger(__name__)
 
 
 def fetch_news(
-    session: requests.Session, ticker: str, company: str = ""
+    session: requests.Session,
+    ticker: str,
+    company: str = "",
+    days: int = NEWS_LOOKBACK_DAYS,
+    min_score: int = 1,
 ) -> list[Bullet]:
-    """Recent company news for one ticker, noise removed and scored."""
+    """Recent company news for one ticker, noise removed and scored.
+
+    `days` and `min_score` are widened for research reports: a digest wants
+    only what interrupts your day, but a report benefits from context that
+    would not clear that bar on its own.
+    """
     today = date.today()
     try:
         resp = session.get(
             f"{FINNHUB_BASE}/company-news",
             params={
                 "symbol": ticker,
-                "from": (today - timedelta(days=NEWS_LOOKBACK_DAYS)).isoformat(),
+                "from": (today - timedelta(days=days)).isoformat(),
                 "to": today.isoformat(),
                 "token": finnhub_api_key(),
             },
@@ -62,7 +71,7 @@ def fetch_news(
         if key in seen:
             continue
         score = score_headline(headline)
-        if score <= 0:
+        if score < min_score:
             continue
         if not is_subject(headline, ticker, company):
             # Named as a participant in someone else's story. Keep it, but let

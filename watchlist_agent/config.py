@@ -79,6 +79,10 @@ EARNINGS_LEAD_DAYS = 7
 EARNINGS_LOOKAHEAD_DAYS = 30
 # Quarters of fundamentals to trend in a report.
 FUNDAMENTALS_QUARTERS = 6
+# Research looks back further than the daily digest: the most recent quarterly
+# filing is routinely older than ten days, and context outranks brevity.
+RESEARCH_NEWS_DAYS = 45
+RESEARCH_FILINGS_DAYS = 120
 
 # Finnhub's free tier allows 60 requests/minute. Stay comfortably under it.
 FINNHUB_MAX_RPM = 55
