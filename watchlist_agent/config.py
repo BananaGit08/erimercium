@@ -18,6 +18,11 @@ ET = ZoneInfo("America/New_York")
 EDT_CRON = "30 20 * * 1-5"  # 20:30 UTC == 4:30pm EDT (March-November)
 EST_CRON = "30 21 * * 1-5"  # 21:30 UTC == 4:30pm EST (November-March)
 
+# Research runs in the morning instead: a pre-earnings report is worth more
+# before the trading day than after it closes.
+RESEARCH_EDT_CRON = "0 11 * * 1-5"  # 11:00 UTC == 7:00am EDT
+RESEARCH_EST_CRON = "0 12 * * 1-5"  # 12:00 UTC == 7:00am EST
+
 DEFAULT_MOVE_THRESHOLD_PCT = 3.0
 
 # Defaults for per-ticker flagging; overridable from watchlist.json.
@@ -133,10 +138,14 @@ def now_et() -> datetime:
     return datetime.now(ET)
 
 
-def expected_cron(now: datetime | None = None) -> str:
-    """Which of the two cron entries is the correct one for today's ET offset."""
+def expected_cron(
+    now: datetime | None = None,
+    edt_cron: str = EDT_CRON,
+    est_cron: str = EST_CRON,
+) -> str:
+    """Which of a job's two cron entries is correct for today's ET offset."""
     now = now or now_et()
-    return EDT_CRON if now.utcoffset() == timedelta(hours=-4) else EST_CRON
+    return edt_cron if now.utcoffset() == timedelta(hours=-4) else est_cron
 
 
 def _normalize_cron(cron: str) -> str:
@@ -144,7 +153,10 @@ def _normalize_cron(cron: str) -> str:
 
 
 def should_run_for_schedule(
-    cron: str, now: datetime | None = None
+    cron: str,
+    now: datetime | None = None,
+    edt_cron: str = EDT_CRON,
+    est_cron: str = EST_CRON,
 ) -> tuple[bool, str]:
     """Decide whether a scheduled run should send the digest.
 
@@ -157,7 +169,7 @@ def should_run_for_schedule(
     """
     now = now or now_et()
     fired = _normalize_cron(cron)
-    wanted = _normalize_cron(expected_cron(now))
+    wanted = _normalize_cron(expected_cron(now, edt_cron, est_cron))
     season = "EDT" if now.utcoffset() == timedelta(hours=-4) else "EST"
     if fired == wanted:
         return True, (

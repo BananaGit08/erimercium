@@ -12,7 +12,7 @@ what is happening to them.
 |---|---|---|
 | 1 | Price digest — per-ticker move detection, email at 4:30pm ET | **Done** |
 | 2 | Company news + SEC filings (10-Q / 10-K / 8-K), materiality-filtered | **Done** |
-| 3 | Research reports: baseline, pre-earnings, event-triggered | Data + scheduling done; writing needs an API key |
+| 3 | Research reports: baseline, pre-earnings, event-triggered | **Done** |
 | 4 | Formatting, source links, filter tuning | Not started |
 
 ## Setup
@@ -271,9 +271,27 @@ list, being a premium endpoint. A report that says "price target data
 unavailable" is worth more than one that leaves the reader assuming the
 sentiment read was complete.
 
-`python -m watchlist_agent.deep_dive --due` shows what the scheduler would
-generate today; `--ticker X --dossier-only` prints the gathered data without
-writing anything.
+Reports run at **7:00am ET every weekday**, before the open, so a pre-earnings
+report is useful the day it lands. Both DST cron offsets are registered and the
+off-season one is discarded by the same cron-identity check the digest uses.
+
+A run is capped at six reports. Earnings cluster hard — eight holdings reported
+within one week of each other in the first live batch — and at roughly five
+minutes each a full queue outlives any sensible timeout. The cap takes the
+front of the queue, which is earnings ordered soonest-first; the rest stay due
+and are picked up the next morning.
+
+Delivery state is committed back on `always()`, including when a run is
+cancelled. The first batch was cut off by a timeout after emailing four
+reports and skipped its recording step, which would have re-sent all four the
+next day.
+
+| Command | Does |
+|---|---|
+| `--due` | Show what would be generated today, generating nothing |
+| `--run` | Generate, email and record everything due |
+| `--ticker X --dossier-only` | Print the gathered data, no model, no key needed |
+| `--ticker X` | One report on demand |
 
 ## Disclaimer
 

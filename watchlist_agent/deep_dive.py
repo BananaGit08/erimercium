@@ -9,7 +9,13 @@ from datetime import date
 
 import requests
 
-from .config import ConfigError, finnhub_api_key
+from .config import (
+    RESEARCH_EDT_CRON,
+    RESEARCH_EST_CRON,
+    ConfigError,
+    finnhub_api_key,
+    should_run_for_schedule,
+)
 from .dossier import build, to_prompt_context
 from .email_report import (
     render_research_html,
@@ -188,6 +194,14 @@ def main(argv: list[str] | None = None) -> int:
         help="Generate and email every report that is due today.",
     )
     parser.add_argument(
+        "--schedule",
+        default="",
+        help=(
+            "The cron expression that triggered this run "
+            "(github.event.schedule). Discards the off-season DST entry."
+        ),
+    )
+    parser.add_argument(
         "--max-reports",
         type=int,
         default=6,
@@ -202,6 +216,14 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+
+    if args.schedule:
+        allowed, reason = should_run_for_schedule(
+            args.schedule, edt_cron=RESEARCH_EDT_CRON, est_cron=RESEARCH_EST_CRON
+        )
+        log.info("%s", reason)
+        if not allowed:
+            return 0
 
     try:
         if args.run:
