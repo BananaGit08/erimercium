@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import statistics
 import sys
+import time
 from datetime import datetime, timezone
 
 import requests
@@ -67,8 +68,71 @@ def inspect(ticker: str) -> None:
     print(f"  1.4826 x MAD     : {1.4826 * mad:.2f}%")
 
 
-for t in sys.argv[1:] or ["MRNA", "SNDK", "SKHY", "SPCX", "AMZN"]:
-    try:
-        inspect(t)
-    except Exception as exc:  # noqa: BLE001 - diagnostic
-        print(f"\n=== {t} ===\n  FAILED: {type(exc).__name__}: {exc}")
+if not (len(sys.argv) > 1 and sys.argv[1] == "--concepts"):
+    for t in sys.argv[1:] or ["MRNA", "SNDK", "SKHY", "SPCX", "AMZN"]:
+        try:
+            inspect(t)
+        except Exception as exc:  # noqa: BLE001 - diagnostic
+            print(f"\n=== {t} ===\n  FAILED: {type(exc).__name__}: {exc}")
+
+
+# --- SEC XBRL concept probe ------------------------------------------------
+SEC_UA = "erimercium-watchlist-agent christian@banananorth.com"
+CONCEPT_TAGS = [
+    "RevenueFromContractWithCustomerExcludingAssessedTax", "Revenues",
+    "NetIncomeLoss", "ProfitLoss", "GrossProfit", "OperatingIncomeLoss",
+    "LongTermDebtNoncurrent", "LongTermDebt", "StockholdersEquity",
+    "CashAndCashEquivalentsAtCarryingValue",
+]
+
+
+def probe_concepts(ticker: str) -> None:
+    """What SEC actually returns per concept: status, count, and date span."""
+    tickers = requests.get(
+        "https://www.sec.gov/files/company_tickers.json",
+        headers={"User-Agent": SEC_UA}, timeout=20,
+    ).json()
+    cik = next(
+        (str(r["cik_str"]).zfill(10) for r in tickers.values()
+         if str(r.get("ticker", "")).upper() == ticker.upper()),
+        None,
+    )
+    print(f"\n=== {ticker} SEC concepts (CIK {cik}) ===")
+    if not cik:
+        print("  no CIK found")
+        return
+
+    for tag in CONCEPT_TAGS:
+        url = f"https://data.sec.gov/api/xbrl/companyconcept/CIK{cik}/us-gaap/{tag}.json"
+        try:
+            r = requests.get(url, headers={"User-Agent": SEC_UA}, timeout=20)
+        except Exception as exc:  # noqa: BLE001
+            print(f"  {tag:<58} EXCEPTION {exc}")
+            continue
+        if r.status_code != 200:
+            print(f"  {tag:<58} HTTP {r.status_code}")
+            continue
+        units = r.json().get("units", {}).get("USD", [])
+        quarterly = []
+        for e in units:
+            if e.get("start") and e.get("end"):
+                from datetime import date as _d
+                try:
+                    span = (_d.fromisoformat(e["end"]) - _d.fromisoformat(e["start"])).days
+                except ValueError:
+                    continue
+                if 80 <= span <= 100:
+                    quarterly.append(e["end"])
+        ends = sorted({e["end"] for e in units if e.get("end")})
+        qends = sorted(set(quarterly))
+        print(f"  {tag:<58} {len(units):>4} entries, "
+              f"all {ends[0] if ends else '-'}..{ends[-1] if ends else '-'}, "
+              f"quarterly {len(qends)} "
+              f"{qends[-1] if qends else '(none)'}")
+        time.sleep(0.15)
+
+
+if len(sys.argv) > 1 and sys.argv[1] == "--concepts":
+    import time
+    for t in sys.argv[2:] or ["PYPL"]:
+        probe_concepts(t)
