@@ -15,9 +15,9 @@ import requests
 from .config import (
     EARNINGS_LOOKAHEAD_DAYS,
     FINNHUB_BASE,
-    HTTP_TIMEOUT_SECONDS,
     finnhub_api_key,
 )
+from .http import get_json
 
 log = logging.getLogger(__name__)
 
@@ -58,27 +58,23 @@ def fetch_calendar(
     and stays well inside the free tier.
     """
     today = date.today()
-    try:
-        resp = session.get(
-            f"{FINNHUB_BASE}/calendar/earnings",
-            params={
-                "from": today.isoformat(),
-                "to": (today + timedelta(days=days_ahead)).isoformat(),
-                "token": finnhub_api_key(),
-            },
-            timeout=HTTP_TIMEOUT_SECONDS,
-        )
-    except requests.RequestException as exc:
-        log.warning("earnings calendar request failed: %s", exc)
+    # The whole day's scheduling rests on this one request: an empty calendar
+    # means nothing looks due, so every pre-earnings report that should have
+    # gone out is simply skipped without anything appearing to fail.
+    payload = get_json(
+        session,
+        f"{FINNHUB_BASE}/calendar/earnings",
+        label="earnings calendar",
+        params={
+            "from": today.isoformat(),
+            "to": (today + timedelta(days=days_ahead)).isoformat(),
+            "token": finnhub_api_key(),
+        },
+    )
+    if not isinstance(payload, dict):
+        log.warning("earnings calendar unavailable — nothing will look due today")
         return {}
-    if not resp.ok:
-        log.warning("earnings calendar HTTP %s", resp.status_code)
-        return {}
-    try:
-        rows = resp.json().get("earningsCalendar", [])
-    except (ValueError, AttributeError):
-        log.warning("earnings calendar payload unusable")
-        return {}
+    rows = payload.get("earningsCalendar") or []
 
     calendar: dict[str, EarningsEvent] = {}
     for row in rows:

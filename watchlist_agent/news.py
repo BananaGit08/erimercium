@@ -9,10 +9,10 @@ import requests
 
 from .config import (
     FINNHUB_BASE,
-    HTTP_TIMEOUT_SECONDS,
     NEWS_LOOKBACK_DAYS,
     finnhub_api_key,
 )
+from .http import get_json
 from .materiality import Bullet, is_about_company, is_noise, is_subject, score_headline
 
 log = logging.getLogger(__name__)
@@ -32,27 +32,17 @@ def fetch_news(
     would not clear that bar on its own.
     """
     today = date.today()
-    try:
-        resp = session.get(
-            f"{FINNHUB_BASE}/company-news",
-            params={
-                "symbol": ticker,
-                "from": (today - timedelta(days=days)).isoformat(),
-                "to": today.isoformat(),
-                "token": finnhub_api_key(),
-            },
-            timeout=HTTP_TIMEOUT_SECONDS,
-        )
-    except requests.RequestException as exc:
-        log.warning("news request failed for %s: %s", ticker, exc)
-        return []
-    if not resp.ok:
-        log.warning("news HTTP %s for %s", resp.status_code, ticker)
-        return []
-    try:
-        articles = resp.json()
-    except ValueError:
-        return []
+    articles = get_json(
+        session,
+        f"{FINNHUB_BASE}/company-news",
+        label=f"news for {ticker}",
+        params={
+            "symbol": ticker,
+            "from": (today - timedelta(days=days)).isoformat(),
+            "to": today.isoformat(),
+            "token": finnhub_api_key(),
+        },
+    )
     if not isinstance(articles, list):
         return []
 

@@ -7,7 +7,8 @@ from dataclasses import dataclass, field
 
 import requests
 
-from .config import FINNHUB_BASE, HTTP_TIMEOUT_SECONDS, finnhub_api_key
+from .config import FINNHUB_BASE, finnhub_api_key
+from .http import get_json
 
 log = logging.getLogger(__name__)
 
@@ -100,32 +101,13 @@ class MarketData:
 
 def _get(session: requests.Session, path: str, status: dict | None = None, **params):
     params["token"] = finnhub_api_key()
-    try:
-        resp = session.get(
-            f"{FINNHUB_BASE}/{path}", params=params, timeout=HTTP_TIMEOUT_SECONDS
-        )
-    except requests.RequestException as exc:
-        log.warning("finnhub %s failed: %s", path, exc)
-        if status is not None:
-            status["note"] = f"request failed: {exc}"
-        return None
-    if not resp.ok:
-        # 403 here means the endpoint is premium on this key.
-        log.warning("finnhub %s HTTP %s: %s", path, resp.status_code, resp.text[:160])
-        if status is not None:
-            status["note"] = f"HTTP {resp.status_code} {resp.text[:120]}"
-        return None
-    try:
-        return resp.json()
-    except ValueError:
-        # A 200 whose body is not JSON. This is the path that silently
-        # produced "no analyst ratings" for PYPL and NKE, so record what
-        # actually came back rather than returning a bare None.
-        body = resp.text[:160].replace("\n", " ")
-        log.warning("finnhub %s returned non-JSON: %r", path, body)
-        if status is not None:
-            status["note"] = f"200 but non-JSON body: {body!r}"
-        return None
+    return get_json(
+        session,
+        f"{FINNHUB_BASE}/{path}",
+        label=f"finnhub {path}",
+        status=status,
+        params=params,
+    )
 
 
 def fetch(session: requests.Session, ticker: str) -> MarketData:
