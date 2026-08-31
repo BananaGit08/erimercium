@@ -69,10 +69,13 @@ is carrying two ideas and should be two bullets or one shorter one.
 - The grade reflects the balance of evidence today, not a prediction of the \
 share price.
 
-Output format, exactly. Each heading on its own line, nothing before the first:
+Output format, exactly. Each heading on its own line, nothing before the first.
+All seven headings are required, in this order, and SUMMARY comes first --
+it is the only part some readers will read, so never omit it:
 
 SUMMARY
-One paragraph on what is actually going on.
+One paragraph on what is actually going on. Write this last, once the rest is
+settled, but place it first.
 
 LEADERSHIP
 2-4 bullets starting with "- ".
@@ -210,6 +213,21 @@ def synthesize(dossier: Dossier, model: str | None = None) -> Report:
     server_use = getattr(usage, "server_tool_use", None) if usage else None
     report.searches = getattr(server_use, "web_search_requests", 0) or 0
 
-    log.info("%s report: grade %s, %d sections, %d searches",
-             dossier.ticker, report.grade or "?", len(report.sections), report.searches)
+    expected = {label for _, label in SECTIONS}
+    absent = expected - set(report.sections)
+    if absent:
+        # The last PYPL run silently dropped SUMMARY, which is the section a
+        # busy reader is most likely to read. Say so rather than ship a report
+        # that is quietly missing a required part.
+        log.warning(
+            "%s report is missing %s — the model did not follow the format",
+            dossier.ticker,
+            ", ".join(sorted(absent)),
+        )
+    if not report.grade:
+        log.warning("%s report has no parseable grade", dossier.ticker)
+
+    log.info("%s report: grade %s, %d/%d sections, %d searches",
+             dossier.ticker, report.grade or "?", len(report.sections),
+             len(expected), report.searches)
     return report
