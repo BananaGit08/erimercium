@@ -19,6 +19,31 @@ log = logging.getLogger(__name__)
 # The client chose the lower-cost tier; override with RESEARCH_MODEL to compare.
 DEFAULT_MODEL = "claude-sonnet-5"
 
+# Published rates for the default model, in dollars per million tokens, plus
+# the per-search charge. Only used to log an estimate: the client is funding
+# this from a prepaid balance, and "how long will $50 last" cannot be answered
+# by arithmetic over a cost nobody has measured. Wrong if the model is
+# overridden or the rates change, which is why the log line names the model.
+COST_PER_MTOK_IN = 2.00
+COST_PER_MTOK_OUT = 10.00
+COST_PER_SEARCH = 0.01
+
+
+def _estimate_cost(usage, searches: int) -> float:
+    if usage is None:
+        return 0.0
+    read = getattr(usage, "cache_read_input_tokens", 0) or 0
+    created = getattr(usage, "cache_creation_input_tokens", 0) or 0
+    plain = getattr(usage, "input_tokens", 0) or 0
+    out = getattr(usage, "output_tokens", 0) or 0
+    # Cache reads bill at a tenth, cache writes at 1.25x.
+    billed_in = plain + created * 1.25 + read * 0.10
+    return (
+        billed_in / 1_000_000 * COST_PER_MTOK_IN
+        + out / 1_000_000 * COST_PER_MTOK_OUT
+        + searches * COST_PER_SEARCH
+    )
+
 # Six was too few. The first DOCU report spent four of its bullets explaining
 # that the search limit stopped it verifying the CEO's track record, the 8-K
 # officer change and the analyst ratings -- the three things web search is
@@ -143,6 +168,9 @@ class Report:
     raw: str = ""
     model: str = ""
     searches: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cost: float = 0.0
 
     @property
     def summary(self) -> str:
@@ -346,6 +374,9 @@ def synthesize(dossier: Dossier, model: str | None = None) -> Report:
     usage = getattr(message, "usage", None)
     server_use = getattr(usage, "server_tool_use", None) if usage else None
     report.searches = getattr(server_use, "web_search_requests", 0) or 0
+    report.input_tokens = getattr(usage, "input_tokens", 0) or 0
+    report.output_tokens = getattr(usage, "output_tokens", 0) or 0
+    report.cost = _estimate_cost(usage, report.searches)
     _fill_missing_summary(client, model, dossier, report)
     _warn_on_gaps(dossier, report)
     return report
@@ -448,3 +479,7 @@ def _warn_on_gaps(dossier: Dossier, report: Report) -> None:
              dossier.ticker, report.grade or "?", len(report.sections),
              len(expected), report.searches, len(report.all_sources),
              len(report.searched))
+    log.info("%s cost: ~$%.3f (%s; in %s, out %s, %d searches)",
+             dossier.ticker, report.cost, report.model,
+             f"{report.input_tokens:,}", f"{report.output_tokens:,}",
+             report.searches)
