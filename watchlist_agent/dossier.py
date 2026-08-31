@@ -77,9 +77,12 @@ def build(
         if not dossier.market.metrics:
             dossier.note_gap("no valuation metrics available")
         if not dossier.market.recommendations.months:
+            # Finnhub answers this endpoint with an HTML paywall page and a 200
+            # status on the free tier, so it is premium in practice whatever
+            # the documentation says.
             dossier.note_gap(
-                "no analyst ratings available"
-                + (f" — {dossier.market.ratings_note}" if dossier.market.ratings_note else "")
+                "analyst ratings feed is paywalled — source ratings and price "
+                "targets by web search instead"
             )
         # Price targets are a premium Finnhub endpoint, so sentiment is
         # rating-mix only. Say so rather than let a reader assume otherwise.
@@ -101,8 +104,18 @@ def build(
             entry = _load_cik_map(sec).get(ticker.upper())
             if entry:
                 dossier.fundamentals = fetch_fundamentals(sec, ticker, entry[0])
-                if not dossier.fundamentals.revenue:
+                f = dossier.fundamentals
+                if not f.revenue:
                     dossier.note_gap("no quarterly revenue series in XBRL")
+                for entry in f.stale:
+                    dossier.note_gap(
+                        f"fundamentals series is out of date — {entry}; treat it "
+                        "as historical, not current"
+                    )
+                if f.missing:
+                    dossier.note_gap(
+                        "not reported in XBRL: " + ", ".join(f.missing)
+                    )
 
     log.info(
         "%s dossier: %d news, %d filings, %d peers, %d gaps",
