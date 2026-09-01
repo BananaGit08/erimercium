@@ -406,6 +406,29 @@ re-examined filing cannot produce a duplicate.
 covered by the scheduled cadence, and including it would fire a duplicate
 report every quarter for every holding.
 
+### The record against consensus
+
+Every report carries the last four quarters of reported EPS against what
+consensus expected, from Finnhub's free `/stock/earnings` endpoint, with one
+line naming the pattern.
+
+**The line never reports a bare count, and that is the point.** Companies guide
+conservatively and most large caps beat EPS consensus most quarters, so "beat 4
+of 4" is roughly the market's base rate rather than a finding about this
+company. What distinguishes one name from another is the size of the surprises,
+whether they are consistent or scattered, and which way they are trending -- so
+the line says *"beat consensus in all 4, but by a narrowing margin (averaging
++1.6%)"* or *"2 beats and 2 misses, ranging from -9.7% to +12.4%"*.
+
+The percentage is withheld where the estimate is too small to bear one: a
+two-cent beat on a one-cent estimate is +200% and says more about the
+denominator than the company, so below a nickel the difference is reported in
+cents instead. A quarter with no published estimate is excluded rather than
+counted as a miss -- an absence is not a disappointment.
+
+The table is rendered from the data rather than written by the model, so the
+figures cannot drift.
+
 ### What a report is built from
 
 Everything except the writing runs on free public data and needs no API key:

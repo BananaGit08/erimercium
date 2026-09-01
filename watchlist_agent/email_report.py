@@ -471,6 +471,25 @@ def _source_line_html(sources: list, muted: str) -> str:
     )
 
 
+def _surprise_rows(dossier) -> tuple[list[tuple[str, str, str, str]], str]:
+    """The beat/miss table and the line that characterises it.
+
+    Rendered from the data rather than written by the model. The numbers are
+    exact and cannot drift, and the pattern line is computed the same way every
+    time -- which matters more here than elsewhere, because a run of beats is
+    close to the market's base rate and it would be easy to describe it as a
+    finding.
+    """
+    history = getattr(dossier, "surprises", None)
+    if not history or not history.quarters:
+        return [], ""
+    rows = [
+        (q.period, f"{q.estimate:.2f}", f"{q.actual:.2f}", q.summary)
+        for q in history.quarters
+    ]
+    return rows, history.characterise()
+
+
 def render_research_text(report, dossier) -> str:
     from .synthesis import SECTIONS
 
@@ -486,6 +505,14 @@ def render_research_text(report, dossier) -> str:
         for label, value in figures:
             lines.append(f"  {label:<{width}}  {value}")
         lines.append("")
+    rows, pattern = _surprise_rows(dossier)
+    if rows:
+        lines += ["AGAINST CONSENSUS", ""]
+        lines.append(f"  {'quarter':<9} {'estimate':>9} {'actual':>9}  result")
+        for period, estimate, actual, result in rows:
+            lines.append(f"  {period:<9} {estimate:>9} {actual:>9}  {result}")
+        lines += ["", f"  {pattern}", ""]
+
     if report.grade:
         lines += [f"GRADE: {report.grade}", report.grade_reason, ""]
     for _, label in SECTIONS:
@@ -585,6 +612,45 @@ def render_research_html(report, dossier) -> str:
             f"<tr>{cells}</tr></table>"
         )
 
+    rows, pattern = _surprise_rows(dossier)
+    surprise_block = ""
+    if rows:
+        header = (
+            f'<tr><th style="text-align:left;padding:4px 14px 4px 0;color:{muted};'
+            f'font-size:11px;letter-spacing:.05em;text-transform:uppercase;'
+            f'font-weight:600;">Quarter</th>'
+            f'<th style="text-align:right;padding:4px 14px 4px 0;color:{muted};'
+            f'font-size:11px;letter-spacing:.05em;text-transform:uppercase;'
+            f'font-weight:600;">Estimate</th>'
+            f'<th style="text-align:right;padding:4px 14px 4px 0;color:{muted};'
+            f'font-size:11px;letter-spacing:.05em;text-transform:uppercase;'
+            f'font-weight:600;">Actual</th>'
+            f'<th style="text-align:left;padding:4px 0;color:{muted};'
+            f'font-size:11px;letter-spacing:.05em;text-transform:uppercase;'
+            f'font-weight:600;">Result</th></tr>'
+        )
+        body = "".join(
+            f'<tr><td style="padding:3px 14px 3px 0;font-size:13.5px;">'
+            f"{escape(period)}</td>"
+            f'<td style="padding:3px 14px 3px 0;font-size:13.5px;text-align:right;'
+            f'font-variant-numeric:tabular-nums;">{escape(estimate)}</td>'
+            f'<td style="padding:3px 14px 3px 0;font-size:13.5px;text-align:right;'
+            f'font-variant-numeric:tabular-nums;">{escape(actual)}</td>'
+            f'<td style="padding:3px 0;font-size:13.5px;color:'
+            f'{"#0f7b3f" if result.startswith("beat") else "#b3261e" if result.startswith("missed") else muted};">'
+            f"{escape(result)}</td></tr>"
+            for period, estimate, actual, result in rows
+        )
+        surprise_block = (
+            f'<div style="margin:20px 0 0;">'
+            f'<div style="color:{muted};font-size:11px;letter-spacing:.05em;'
+            f'text-transform:uppercase;margin:0 0 6px;">Against consensus</div>'
+            f'<table role="presentation" cellpadding="0" cellspacing="0" '
+            f'style="border-collapse:collapse;">{header}{body}</table>'
+            f'<p style="margin:8px 0 0;font-size:13px;line-height:1.5;">'
+            f"{escape(pattern)}</p></div>"
+        )
+
     grade_block = ""
     if report.grade:
         grade_block = (
@@ -605,6 +671,7 @@ def render_research_html(report, dossier) -> str:
     &middot; {now_et():%B %d, %Y}
   </p>
   {figures_block}
+  {surprise_block}
   {grade_block}
   {"".join(blocks)}
   <p style="margin:30px 0 0;padding-top:14px;border-top:1px solid #e5e7eb;

@@ -20,6 +20,7 @@ from .market_data import MarketData, fetch as fetch_market, peer_comparison
 from .materiality import Bullet
 from .news import fetch_news
 from .prices import Quote
+from .surprises import SurpriseHistory, fetch as fetch_surprises
 
 log = logging.getLogger(__name__)
 
@@ -38,6 +39,7 @@ class Dossier:
     peer_pe: dict[str, float] = field(default_factory=dict)
     news: list[Bullet] = field(default_factory=list)
     filings: list[Bullet] = field(default_factory=list)
+    surprises: SurpriseHistory | None = None
     gaps: list[str] = field(default_factory=list)
 
     @property
@@ -87,6 +89,16 @@ def build(
         # Price targets are a premium Finnhub endpoint, so sentiment is
         # rating-mix only. Say so rather than let a reader assume otherwise.
         dossier.note_gap("analyst price targets unavailable (premium data)")
+
+        # How reliable consensus has been for this name. A report built on
+        # estimates is worth more when the reader knows whether this management
+        # habitually clears the bar, misses it, or swings either way.
+        dossier.surprises = fetch_surprises(finnhub, ticker)
+        if not dossier.surprises.quarters:
+            dossier.note_gap(
+                "no earnings surprise history — cannot say how reliable "
+                "consensus has been for this name"
+            )
 
         if dossier.market.peers:
             dossier.peer_pe = peer_comparison(finnhub, dossier.market.peers)
@@ -144,6 +156,23 @@ def to_prompt_context(dossier: Dossier) -> str:
             f"  consensus revenue estimate: "
             f"{f'${e.revenue_estimate:,.0f}' if e.revenue_estimate else 'n/a'}",
         ]
+
+    if dossier.surprises and dossier.surprises.quarters:
+        h = dossier.surprises
+        lines += ["", "RECORD AGAINST CONSENSUS (newest first):"]
+        for q in h.quarters:
+            lines.append(
+                f"  {q.period}: estimate {q.estimate:.2f}, actual {q.actual:.2f} "
+                f"— {q.summary}"
+            )
+        lines.append(f"  pattern: {h.characterise()}")
+        # Say it outright: a run of beats is close to the market's base rate,
+        # and a report that treats it as a finding is reporting noise.
+        lines.append(
+            "  note: most large caps beat EPS consensus most quarters because "
+            "guidance is set conservatively. The size, consistency and "
+            "direction of the surprises carry the information, not the count."
+        )
 
     if dossier.fundamentals:
         f = dossier.fundamentals
