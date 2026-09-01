@@ -1,0 +1,85 @@
+name: Watchlist commands by email
+
+on:
+  # A poll, not a wall-clock event: unlike the digest and research workflows
+  # there is no DST cron pair here, because nothing about this job depends on
+  # what time it is. GitHub delays scheduled runs routinely, and a delayed poll
+  # is simply a slightly later poll.
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Print replies to the job log instead of sending them"
+        type: boolean
+        default: false
+
+# The job commits watchlist.json back after applying a change. Without write
+# permission the push is refused with a 403 and the change is silently lost on
+# the next checkout -- the same failure the research workflow hit on its first
+# scheduled run.
+permissions:
+  contents: write
+
+# Two overlapping runs would race on watchlist.json and could answer the same
+# message twice.
+concurrency:
+  group: inbox
+  cancel-in-progress: false
+
+jobs:
+  inbox:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Read the mailbox
+        env:
+          FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
+          GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          DIGEST_RECIPIENT: ${{ vars.DIGEST_RECIPIENT || 'christian.na@icloud.com' }}
+          COMMAND_SENDER: ${{ vars.COMMAND_SENDER }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          args=()
+          if [ "$DRY_RUN" = "true" ]; then
+            args+=(--dry-run)
+          fi
+          python -m watchlist_agent.inbox "${args[@]}"
+
+      - name: Record what changed
+        # always(): a reply saying "Added NVDA" has already gone out by this
+        # point. If the change is not committed the next poll re-reads the same
+        # message and sends the confirmation twice, so this must run even when
+        # the step above failed partway through.
+        if: ${{ always() && inputs.dry_run != true }}
+        run: |
+          if git diff --quiet -- watchlist.json inbox_state.json; then
+            echo "no watchlist changes to record"
+            exit 0
+          fi
+          git config user.name "erimercium-agent"
+          git config user.email "christian@banananorth.com"
+          git add watchlist.json inbox_state.json
+          git commit -m "Apply watchlist changes requested by email"
+          # Rebase before pushing: the research job commits to the same branch
+          # and would otherwise reject this push.
+          for attempt in 1 2 3; do
+            git pull --rebase --autostash origin "${GITHUB_REF_NAME}" && \
+              git push origin "HEAD:${GITHUB_REF_NAME}" && exit 0
+            echo "push attempt $attempt failed; retrying"
+            sleep $((attempt * 5))
+          done
+          echo "::error::could not record the watchlist change -- the next poll will answer the same message again"
+          exit 1

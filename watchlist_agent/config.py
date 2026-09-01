@@ -49,6 +49,17 @@ SEC_DATA_BASE = "https://data.sec.gov"
 SEC_TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
 SEC_ARCHIVES_BASE = "https://www.sec.gov/Archives/edgar/data"
 
+# Gmail's IMAP endpoint. The app password already used to send over SMTP
+# authenticates here too, so reading replies needs no second credential.
+IMAP_HOST = "imap.gmail.com"
+IMAP_SSL_PORT = 993
+
+# Guard rails on a single command email. A message exceeding either is refused
+# whole rather than half-applied: a forwarded thread or a mistyped line should
+# never be able to quietly empty the watchlist.
+MAX_TICKERS_PER_MESSAGE = 25
+MAX_REMOVALS_PER_MESSAGE = 10
+
 # SEC asks for no more than 10 requests/second and a descriptive User-Agent.
 SEC_MAX_RPS = 8
 
@@ -125,6 +136,16 @@ def gmail_app_password() -> str:
 
 def recipient_address() -> str:
     return os.environ.get("DIGEST_RECIPIENT", "christian.na@icloud.com").strip()
+
+
+def command_sender() -> str:
+    """Who may change the watchlist by email.
+
+    Defaults to the digest recipient: the person receiving the emails is the
+    person entitled to change what they cover. Overridable so the two can be
+    separated without touching code.
+    """
+    return os.environ.get("COMMAND_SENDER", "").strip() or recipient_address()
 
 
 def sec_user_agent() -> str:
