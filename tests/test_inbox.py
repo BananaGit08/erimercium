@@ -16,6 +16,7 @@ from watchlist_agent.inbox import (
     Outcome,
     check_guard_rails,
     is_unread,
+    mask_address,
     parse_commands,
     plan_message,
     reply_body,
@@ -424,3 +425,10 @@ def test_archive_folder_falls_back_to_inbox_when_absent():
 
 def test_archive_folder_falls_back_when_list_fails():
     assert archive_folder(_FakeIMAP(None, typ="NO")) == "INBOX"
+
+
+def test_mask_address_keeps_the_domain():
+    assert mask_address("christian.na@icloud.com") == "c***a@icloud.com"
+    assert mask_address("ab@gmail.com") == "a*@gmail.com"
+    assert mask_address("") == "(no address)"
+    assert mask_address("not-an-address") == "(no address)"

@@ -320,6 +320,21 @@ def archive_folder(imap: imaplib.IMAP4) -> str:
     return "INBOX"
 
 
+def mask_address(address: str) -> str:
+    """An address recognisable to its owner but not harvestable from a log.
+
+    These logs are public on a public repository. The domain is kept because
+    telling an iCloud address from a Gmail one is the whole point of the
+    diagnostic; the local part is not.
+    """
+    local, _, domain = address.partition("@")
+    if not domain:
+        return "(no address)"
+    if len(local) <= 2:
+        return f"{local[:1]}*@{domain}"
+    return f"{local[0]}***{local[-1]}@{domain}"
+
+
 def is_unread(fetch_envelope: bytes | str) -> bool:
     """Whether a FETCH response's FLAGS say the message is still unread.
 
@@ -679,6 +694,52 @@ def process_mailbox(dry_run: bool = False) -> int:
     return handled
 
 
+def diagnose_mailbox(limit: int = 25) -> int:
+    """List recent senders without acting on anything.
+
+    For answering the only two questions a silent mailbox poses: are we logged
+    into the mailbox the reader is actually looking at, and what address is the
+    mail really coming from? Headers only -- no bodies are fetched, and no
+    subject, body or full address reaches the log.
+    """
+    since = (date.today() - timedelta(days=INBOX_LOOKBACK_DAYS)).strftime("%d-%b-%Y")
+
+    with imaplib.IMAP4_SSL(IMAP_HOST, IMAP_SSL_PORT) as imap:
+        imap.login(gmail_address(), gmail_app_password())
+        folder = archive_folder(imap)
+        if imap.select(f'"{folder}"')[0] != "OK":
+            folder = "INBOX"
+            imap.select(folder)
+
+        log.info("logged in as %s", mask_address(gmail_address()))
+        log.info("expecting commands from %s", mask_address(command_sender()))
+
+        typ, data = imap.search(None, "SINCE", since)
+        if typ != "OK":
+            log.warning("IMAP search failed: %s", typ)
+            return 0
+
+        numbers = data[0].split()
+        log.info("%d message(s) in %s since %s (showing last %d)",
+                 len(numbers), folder, since, min(limit, len(numbers)))
+
+        for number in numbers[-limit:]:
+            typ, payload = imap.fetch(
+                number, "(FLAGS BODY.PEEK[HEADER.FIELDS (FROM DATE)])"
+            )
+            if typ != "OK" or not payload or not isinstance(payload[0], tuple):
+                continue
+            headers = email.message_from_bytes(payload[0][1])
+            _, address = parseaddr(header_text(headers, "From"))
+            log.info(
+                "  %s  %s  %s",
+                "unread" if is_unread(payload[0][0]) else "read  ",
+                mask_address(address),
+                header_text(headers, "Date"),
+            )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Apply watchlist changes sent by email.")
     parser.add_argument(
@@ -686,11 +747,18 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Print replies instead of sending them, and leave messages unread.",
     )
+    parser.add_argument(
+        "--diagnose",
+        action="store_true",
+        help="List recent senders and read state, acting on nothing.",
+    )
     args = parser.parse_args(argv)
 
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
     )
+    if args.diagnose:
+        return diagnose_mailbox()
     process_mailbox(dry_run=args.dry_run)
     return 0
 

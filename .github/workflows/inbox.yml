@@ -13,6 +13,10 @@ on:
         description: "Print replies to the job log instead of sending them"
         type: boolean
         default: false
+      diagnose:
+        description: "List recent senders and read state, acting on nothing"
+        type: boolean
+        default: false
 
 # The job commits watchlist.json back after applying a change. Without write
 # permission the push is refused with a 403 and the change is silently lost on
@@ -51,9 +55,12 @@ jobs:
           DIGEST_RECIPIENT: ${{ vars.DIGEST_RECIPIENT || 'christian.na@icloud.com' }}
           COMMAND_SENDER: ${{ vars.COMMAND_SENDER }}
           DRY_RUN: ${{ inputs.dry_run }}
+          DIAGNOSE: ${{ inputs.diagnose }}
         run: |
           args=()
-          if [ "$DRY_RUN" = "true" ]; then
+          if [ "$DIAGNOSE" = "true" ]; then
+            args+=(--diagnose)
+          elif [ "$DRY_RUN" = "true" ]; then
             args+=(--dry-run)
           fi
           python -m watchlist_agent.inbox "${args[@]}"
@@ -63,7 +70,7 @@ jobs:
         # point. If the change is not committed the next poll re-reads the same
         # message and sends the confirmation twice, so this must run even when
         # the step above failed partway through.
-        if: ${{ always() && inputs.dry_run != true }}
+        if: ${{ always() && inputs.dry_run != true && inputs.diagnose != true }}
         run: |
           if git diff --quiet -- watchlist.json inbox_state.json; then
             echo "no watchlist changes to record"
