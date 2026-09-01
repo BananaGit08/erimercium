@@ -106,7 +106,21 @@ def _generate_and_send(request: ReportRequest, state: ReportState, dry_run: bool
     if request.kind == "baseline":
         state.record_baseline(request.ticker)
     elif request.kind == "earnings":
-        state.record_earnings(request.ticker, request.period)
+        # Keep what this report expected, so the take-aways sent after the call
+        # can open on the gap between expectation and outcome. The prose is
+        # emailed and discarded; these few fields are what the comparison
+        # actually needs, and they cost nothing to carry.
+        event = dossier.earnings
+        state.record_earnings(
+            request.ticker,
+            request.period,
+            expectation={
+                "eps_estimate": event.eps_estimate if event else None,
+                "revenue_estimate": event.revenue_estimate if event else None,
+                "grade": report.grade or None,
+                "sentiment": (report.sections.get("Analyst sentiment") or "")[:280] or None,
+            },
+        )
     elif request.kind == "event":
         state.record_event(request.ticker, request.accession)
     return True

@@ -1,0 +1,91 @@
+name: Earnings call take-aways
+
+on:
+  # A poll, not a wall-clock event: transcripts appear when the provider
+  # publishes them, not at a fixed hour. So there is no DST cron pair here --
+  # see daily-digest.yml for where that is needed and why -- and a delayed run
+  # is simply a slightly later poll.
+  schedule:
+    - cron: "0 */3 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Print the take-aways to the job log instead of emailing"
+        type: boolean
+        default: false
+      due_only:
+        description: "Show what is awaiting take-aways, generating nothing"
+        type: boolean
+        default: false
+
+# The job records what it sent, and a report delivered but not recorded is a
+# report the next poll sends again.
+permissions:
+  contents: write
+
+concurrency:
+  group: calls
+  cancel-in-progress: false
+
+jobs:
+  calls:
+    runs-on: ubuntu-latest
+    # A transcript runs to ~10,000 words and four of them may be due at once.
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Send take-aways
+        env:
+          FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Free tier: ~25 requests a day at one per second. Without it the job
+          # still runs and reports from the earnings release alone.
+          ALPHAVANTAGE_API_KEY: ${{ secrets.ALPHAVANTAGE_API_KEY }}
+          GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          DIGEST_RECIPIENT: ${{ vars.DIGEST_RECIPIENT || 'christian.na@icloud.com' }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          DUE_ONLY: ${{ inputs.due_only }}
+          TRIGGER_SCHEDULE: ${{ github.event.schedule }}
+        run: |
+          args=()
+          if [ "$DUE_ONLY" = "true" ]; then
+            args+=(--due)
+          elif [ "$DRY_RUN" = "true" ]; then
+            args+=(--dry-run)
+          else
+            args+=(--run)
+          fi
+          python -m watchlist_agent.calls "${args[@]}"
+
+      - name: Record what was sent
+        # always(): a take-aways email already delivered must be recorded even
+        # if the run was cut off afterwards, or the next poll sends it again.
+        if: ${{ always() && inputs.dry_run != true && inputs.due_only != true }}
+        run: |
+          if git diff --quiet -- reports_sent.json; then
+            echo "no take-aways to record"
+            exit 0
+          fi
+          git config user.name "erimercium-agent"
+          git config user.email "christian@banananorth.com"
+          git add reports_sent.json
+          git commit -m "Record earnings call take-aways sent on $(date -u +%Y-%m-%d)"
+          for attempt in 1 2 3; do
+            git pull --rebase --autostash origin "${GITHUB_REF_NAME}" && \
+              git push origin "HEAD:${GITHUB_REF_NAME}" && exit 0
+            echo "push attempt $attempt failed; retrying"
+            sleep $((attempt * 5))
+          done
+          echo "::error::could not record the take-aways -- they will be re-sent"
+          exit 1

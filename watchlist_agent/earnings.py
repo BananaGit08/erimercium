@@ -49,6 +49,67 @@ class EarningsEvent:
         )
 
 
+def fetch_recent(
+    session: requests.Session, days_back: int
+) -> dict[str, EarningsEvent]:
+    """Companies that have already reported, keyed by ticker.
+
+    The same endpoint read backwards. Take-aways are written after a call, so
+    the queue is built from who has reported rather than who is about to; the
+    newest entry wins here, where the soonest wins looking forward.
+    """
+    today = date.today()
+    payload = get_json(
+        session,
+        f"{FINNHUB_BASE}/calendar/earnings",
+        label="recent earnings calendar",
+        params={
+            "from": (today - timedelta(days=days_back)).isoformat(),
+            "to": today.isoformat(),
+            "token": finnhub_api_key(),
+        },
+    )
+    if not isinstance(payload, dict):
+        log.warning("recent earnings calendar unavailable — nothing will look due")
+        return {}
+
+    calendar: dict[str, EarningsEvent] = {}
+    for event in _events(payload.get("earningsCalendar") or []):
+        existing = calendar.get(event.ticker)
+        if existing is None or event.date > existing.date:
+            calendar[event.ticker] = event
+    log.info(
+        "%d symbols reported in the last %d days", len(calendar), days_back
+    )
+    return calendar
+
+
+def _events(rows: list) -> list[EarningsEvent]:
+    """Parse calendar rows, skipping anything without a usable date or period."""
+    events: list[EarningsEvent] = []
+    for row in rows:
+        symbol = (row.get("symbol") or "").upper()
+        if not symbol:
+            continue
+        try:
+            when = date.fromisoformat(row["date"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        year, quarter = row.get("year"), row.get("quarter")
+        if not year or not quarter:
+            continue
+        events.append(EarningsEvent(
+            ticker=symbol,
+            date=when,
+            year=int(year),
+            quarter=int(quarter),
+            eps_estimate=row.get("epsEstimate"),
+            revenue_estimate=row.get("revenueEstimate"),
+            hour=(row.get("hour") or "").lower(),
+        ))
+    return events
+
+
 def fetch_calendar(
     session: requests.Session, days_ahead: int = EARNINGS_LOOKAHEAD_DAYS
 ) -> dict[str, EarningsEvent]:
