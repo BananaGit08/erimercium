@@ -130,6 +130,37 @@ Read state still gates one thing: the "I did not understand that" reply is only
 sent for mail that was still unread. Widening the search window therefore
 cannot produce a burst of replies to correspondence already handled by hand.
 
+**A sentence works too.** The commands above are read first, for nothing and
+instantly. Anything they cannot read is handed to a model, which extracts the
+same three intents from ordinary English and resolves company names to tickers:
+
+```
+Add oracle and send me a list of my current stocks
+```
+
+is read as `add ORCL` plus `list`. That is a real message -- it is the one that
+prompted this, and under the strict grammar alone it got a help reply, because
+"oracle" is a company name rather than a ticker and the sentence carries two
+requests at once. Both are ordinary English; asking the reader to write like a
+command line when the whole point is that he can just reply to an email gets
+the trade backwards.
+
+Three things keep it bounded. It is a **fallback**, so a well-formed command
+never reaches a model and the common path stays free. It **resolves rather
+than acts** -- every guard below still applies to what it returns, additions
+are still priced before they are accepted, and the reply opens with *"I read
+that as: add ORCL, send the watchlist"* so a misread is visible rather than
+silent. And it is **allowed to say it does not know**: a company it cannot
+place is named back to the reader instead of guessed at, because a wrong symbol
+ends up on the watchlist and an admission does not.
+
+Reading a message costs a fraction of a cent, and only unread mail is ever
+handed to the model -- a read message with no command is correspondence already
+dealt with by hand. Without `ANTHROPIC_API_KEY` the job still runs; plain
+English simply gets the help reply instead.
+
+### The strict grammar
+
 **A command must be its whole line.** `add NVDA` is a command; `could you add
 NVDA when you get a chance` is not. Anchoring both ends is what stops ordinary
 prose from editing the watchlist, and a line that is only partly valid is

@@ -67,6 +67,7 @@ from .config import (
     gmail_app_password,
 )
 from .email_report import send_email
+from .intent import Unavailable, understand
 from .prices import fetch_quotes
 from .watchlist import Watchlist
 
@@ -135,6 +136,8 @@ class Plan:
     auth_reason: str = ""
     commands: list[Command] = field(default_factory=list)
     refusal: str = ""
+    interpreted: bool = False
+    unclear: list[str] = field(default_factory=list)
 
     @property
     def actionable(self) -> bool:
@@ -194,6 +197,16 @@ def body_text(message: Message) -> str:
     if plain:
         return "\n".join(plain)
     return _html_to_text("\n".join(markup))
+
+
+def body_text_of(raw: bytes | str) -> str:
+    """The reader's own words from a raw message, quoted material removed."""
+    message = (
+        email.message_from_bytes(raw)
+        if isinstance(raw, bytes)
+        else email.message_from_string(raw)
+    )
+    return strip_quoted(body_text(message)).strip()
 
 
 def strip_quoted(text: str) -> str:
@@ -426,6 +439,46 @@ def plan_message(raw: str | bytes, current: list[str], expected_sender: str) -> 
     return plan
 
 
+def interpret(plan: Plan, held: list[str], body: str) -> None:
+    """Fill in a plan from plain English when the strict grammar found nothing.
+
+    Only reached for a message the deterministic parser could not read, so a
+    well-formed command never costs anything. Failure is not an error: an
+    unreachable model just leaves the plan empty and the reader gets the help
+    reply he would have got anyway.
+    """
+    if not body.strip():
+        # Nothing above the quoted original. Paying a model to read an empty
+        # string is the one call guaranteed to be worthless.
+        return
+
+    try:
+        pairs, unclear = understand(body, held)
+    except Unavailable as exc:
+        log.warning("could not read the message as plain English: %s", exc)
+        return
+
+    plan.unclear = unclear
+    if not pairs:
+        return
+
+    plan.commands = [Command(action, ticker) for action, ticker in pairs]
+    plan.interpreted = True
+    plan.refusal = check_guard_rails(plan.commands, held)
+    log.info("read as: %s", describe(plan.commands))
+
+
+def describe(commands: list[Command]) -> str:
+    """What the commands say, in the reader's terms, for the confirmation."""
+    parts = []
+    for command in commands:
+        if command.action == "list":
+            parts.append("send the watchlist")
+        else:
+            parts.append(f"{command.action} {command.ticker}")
+    return ", ".join(parts)
+
+
 # --- applying --------------------------------------------------------------
 
 
@@ -505,6 +558,12 @@ def reply_body(
     """The confirmation, as (plain text, html)."""
     lines: list[str] = []
 
+    if plan.interpreted and plan.commands:
+        # A fuzzy reading must be visible. The reader can only catch a misread
+        # if he is told what the message was taken to mean.
+        lines.append(f"I read that as: {describe(plan.commands)}.")
+        lines.append("")
+
     if refused:
         lines.append(f"No changes were made: {refused}.")
         lines.append("")
@@ -518,6 +577,11 @@ def reply_body(
         # Only a message with nothing recognisable in it gets the help text. A
         # bare "list" produces no outcomes but is perfectly well understood.
         lines.append(HELP_TEXT)
+
+    if plan.unclear:
+        lines.append("")
+        for name in plan.unclear:
+            lines.append(f"I could not work out which ticker you meant by \u201c{name}\u201d.")
 
     wants_list = any(c.action == "list" for c in plan.commands)
     if not refused and (wants_list or outcomes):
@@ -667,8 +731,18 @@ def process_mailbox(dry_run: bool = False) -> int:
                 outcomes = apply_commands(plan.commands, watchlist)
                 text, markup = reply_body(plan, outcomes, watchlist.tickers)
             elif was_unread:
-                text, markup = reply_body(plan, [], watchlist.tickers)
-                log.info("no command found in message from %s", plan.sender)
+                # Only unread mail is worth a model call: a read message with
+                # no command is correspondence already dealt with by hand.
+                interpret(plan, watchlist.tickers, body_text_of(payload[0][1]))
+                if plan.refusal:
+                    text, markup = reply_body(plan, [], watchlist.tickers, plan.refusal)
+                    log.warning("refused message from %s: %s", plan.sender, plan.refusal)
+                elif plan.commands:
+                    outcomes = apply_commands(plan.commands, watchlist)
+                    text, markup = reply_body(plan, outcomes, watchlist.tickers)
+                else:
+                    text, markup = reply_body(plan, [], watchlist.tickers)
+                    log.info("no request found in message from %s", plan.sender)
             else:
                 # Already-read mail with no command is ordinary correspondence
                 # the reader has dealt with. Answering it because the search

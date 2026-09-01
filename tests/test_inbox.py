@@ -10,11 +10,14 @@ from email.message import EmailMessage
 
 import pytest
 
+from watchlist_agent.config import MAX_TICKERS_PER_MESSAGE as MAX_INTENTS
+from watchlist_agent.intent import read_payload
 from watchlist_agent.inbox import (
     Command,
     archive_folder,
     Outcome,
     check_guard_rails,
+    describe,
     is_unread,
     mask_address,
     parse_commands,
@@ -432,3 +435,116 @@ def test_mask_address_keeps_the_domain():
     assert mask_address("ab@gmail.com") == "a*@gmail.com"
     assert mask_address("") == "(no address)"
     assert mask_address("not-an-address") == "(no address)"
+
+
+# --- reading plain English --------------------------------------------------
+#
+# The model call itself needs a key and a network; what is pinned here is the
+# boundary between its output and a file that gets committed.
+
+
+def test_read_payload_extracts_actions():
+    payload = {
+        "commands": [
+            {"action": "add", "ticker": "ORCL", "company": "oracle"},
+            {"action": "list", "ticker": "", "company": ""},
+        ],
+        "unclear": [],
+    }
+    pairs, unclear = read_payload(payload, HELD)
+    assert pairs == [("add", "ORCL"), ("list", "")]
+    assert unclear == []
+
+
+def test_read_payload_keeps_dotted_and_crypto_symbols():
+    """BRK.B and BTC-USD are both real; the price check is the real filter."""
+    payload = {
+        "commands": [
+            {"action": "add", "ticker": "BRK.B", "company": "Berkshire"},
+            {"action": "add", "ticker": "BTC-USD", "company": "bitcoin"},
+        ],
+        "unclear": [],
+    }
+    pairs, _ = read_payload(payload, HELD)
+    assert pairs == [("add", "BRK.B"), ("add", "BTC-USD")]
+
+
+def test_read_payload_lowercases_are_normalised():
+    payload = {"commands": [{"action": "ADD", "ticker": "orcl", "company": ""}], "unclear": []}
+    assert read_payload(payload, HELD)[0] == [("add", "ORCL")]
+
+
+def test_read_payload_drops_malformed_entries():
+    payload = {
+        "commands": [
+            "not a dict",
+            {"action": "buy", "ticker": "ORCL", "company": ""},
+            {"action": "add", "ticker": "", "company": "mystery"},
+            {"action": "add", "ticker": "TWO WORDS", "company": ""},
+            {"action": "add", "ticker": "WAYTOOLONGSYMBOL", "company": ""},
+            {"action": "add", "ticker": "ORCL", "company": "oracle"},
+        ],
+        "unclear": [],
+    }
+    assert read_payload(payload, HELD)[0] == [("add", "ORCL")]
+
+
+def test_read_payload_deduplicates():
+    payload = {
+        "commands": [
+            {"action": "add", "ticker": "ORCL", "company": ""},
+            {"action": "add", "ticker": "ORCL", "company": "oracle"},
+        ],
+        "unclear": [],
+    }
+    assert read_payload(payload, HELD)[0] == [("add", "ORCL")]
+
+
+def test_read_payload_caps_the_number_of_intents():
+    payload = {
+        "commands": [
+            {"action": "add", "ticker": f"TK{i:02d}", "company": ""} for i in range(40)
+        ],
+        "unclear": [],
+    }
+    assert len(read_payload(payload, HELD)[0]) == MAX_INTENTS
+
+
+def test_read_payload_carries_unresolved_names():
+    payload = {"commands": [], "unclear": ["the airline one", "  "]}
+    pairs, unclear = read_payload(payload, HELD)
+    assert pairs == []
+    assert unclear == ["the airline one"]
+
+
+def test_read_payload_tolerates_missing_keys():
+    assert read_payload({}, HELD) == ([], [])
+
+
+def test_describe_reads_back_in_the_readers_terms():
+    commands = [Command("add", "ORCL"), Command("list"), Command("remove", "ROKU")]
+    assert describe(commands) == "add ORCL, send the watchlist, remove ROKU"
+
+
+def test_interpreted_reply_says_what_it_understood():
+    """A fuzzy reading the reader cannot see is a fuzzy reading he cannot correct."""
+    result = plan("Add oracle and send me a list of my current stocks")
+    result.commands = [Command("add", "ORCL"), Command("list")]
+    result.interpreted = True
+    text, _ = reply_body(result, [Outcome("ORCL", "added")], HELD + ["ORCL"])
+    assert "I read that as: add ORCL, send the watchlist." in text
+    assert "Added ORCL." in text
+
+
+def test_strict_parse_reply_does_not_claim_interpretation():
+    result = plan("add NVDA")
+    text, _ = reply_body(result, [Outcome("NVDA", "added")], HELD)
+    assert "I read that as" not in text
+
+
+def test_unresolved_names_are_reported_back():
+    result = plan("add the airline one")
+    result.unclear = ["the airline one"]
+    text, _ = reply_body(result, [], HELD)
+    assert "could not work out which ticker you meant by" in text
+    assert "the airline one" in text
