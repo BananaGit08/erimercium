@@ -14,6 +14,7 @@ what is happening to them.
 | 2 | Company news + SEC filings (10-Q / 10-K / 8-K), materiality-filtered | **Done** |
 | 3 | Research reports: baseline, pre-earnings, event-triggered | **Done** |
 | 4 | Formatting, source links, filter tuning | Not started |
+| 5 | Watchlist changes by email reply | **Done** |
 
 ## Setup
 
@@ -30,6 +31,11 @@ Add these under **Settings → Secrets and variables → Actions**:
 Google revokes all app passwords whenever the account password changes. If the
 digest silently stops arriving, check that first.
 
+The same app password is used to *read* replies over IMAP, so **IMAP must be
+enabled** on that account (Gmail → Settings → Forwarding and POP/IMAP → Enable
+IMAP). App passwords authenticate fine with IMAP switched off, and the mailbox
+job then fails on every poll with a login error.
+
 Recipient defaults to `christian.na@icloud.com`. Override with a repository
 variable named `DIGEST_RECIPIENT`.
 
@@ -42,6 +48,16 @@ set -a && . ./.env && set +a
 
 python -m watchlist_agent.digest --force --dry-run   # print, do not send
 python -m watchlist_agent.digest --force             # actually send
+
+python -m watchlist_agent.inbox --dry-run            # read mail, print replies
+python -m watchlist_agent.inbox                      # apply and reply
+```
+
+Tests need no key and no network:
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest
 ```
 
 `--force` bypasses the time-window gate; `--dry-run` prints the digest instead
@@ -64,7 +80,8 @@ of emailing it.
 }
 ```
 
-Edit it directly, or ask Claude Code (`add NVDA`, `drop ROKU`).
+Edit it directly, ask Claude Code (`add NVDA`, `drop ROKU`), or reply to any
+digest or research email with the same commands -- see below.
 
 Symbols ending in `-USD` (`BTC-USD`, `ETH-USD`, `XRP-USD`) are treated as
 Coinbase product IDs and priced from Coinbase's free public candles API, because
@@ -74,6 +91,90 @@ to Finnhub.
 Any ticker that cannot be priced is reported in a **Could not price** section of
 the digest rather than failing the run — that is the feedback loop for finding
 delisted, renamed, or uncovered symbols.
+
+## Changing the watchlist by email
+
+Reply to any erimercium email with a command on a line of its own:
+
+```
+add NVDA              remove ROKU           list
++NVDA                 drop ROKU
+add NVDA, PLTR        -ROKU
+```
+
+A poll every 15 minutes reads the mailbox over IMAP, applies what it
+understands, commits `watchlist.json` back, and answers in the same thread
+saying exactly what changed. Turnaround is therefore up to about a quarter of
+an hour, not instant.
+
+**A command must be its whole line.** `add NVDA` is a command; `could you add
+NVDA when you get a chance` is not. Anchoring both ends is what stops ordinary
+prose from editing the watchlist, and a line that is only partly valid is
+rejected rather than half-applied.
+
+**Several tickers need a comma or `and` between them.** `add NVDA, PLTR` works;
+`add NVDA PLTR` does not. This looks fussy until you count how many English
+words are five letters or shorter: `remove the AAPL row` splits into three
+perfectly ticker-shaped tokens, and under a space-separated rule it deletes a
+real holding out of a sentence nobody meant as a command. The first version of
+this parser did exactly that to `- Apple names a new CFO`, a line the digest
+writes itself. Punctuation is where a writer's intent actually changes -- lists
+get it, prose does not.
+
+**Quoted text is cut before parsing.** Mail clients quote the message being
+replied to, and a digest quotes back up to twelve tickers. Everything from the
+first quote marker onward -- a leading `>`, Gmail's `On ... wrote:` (including
+the wrapped two-line form), Outlook's `-----Original Message-----`, a `-- `
+signature rule -- is discarded before a single command is read. Without this,
+one-line replies rewrite the whole watchlist.
+
+**Additions are priced before they are accepted.** A symbol that cannot be
+quoted is refused, with the reason in the reply, rather than becoming a
+permanent entry in the digest's "could not price" section that nobody reads as
+an error. Removals are not price-checked: a ticker already on the list is
+removable whether or not its data source still answers.
+
+### Who is allowed to send commands
+
+Two checks, both required:
+
+1. The `From` address matches `COMMAND_SENDER` (defaults to
+   `DIGEST_RECIPIENT`).
+2. Gmail's own `Authentication-Results` header records `dmarc=pass`.
+
+The second check is the one doing the work. A `From` header is forgeable by
+anyone who learns the address; the DMARC verdict is Gmail's, reached when it
+accepted the message, and a sender cannot assert it. A missing header is
+treated as a failure rather than a pass.
+
+A message failing either check is left unread, logged at `WARNING`, and **not
+answered**. Replying would confirm to a forger that the address is live.
+
+### Guard rails
+
+| Rule | Why |
+|---|---|
+| At most 25 tickers per message | A message this large is more likely a forwarded thread parsed by accident than a considered request |
+| At most 10 effective removals per message | Same, on the destructive side |
+| Never leave the watchlist empty | No single email should be able to switch the whole system off |
+
+Tripping a guard rail refuses the message **whole** and says so in the reply.
+Applying the first half of a message that was never meant as a command is the
+worst available outcome.
+
+### Duplicates
+
+`inbox_state.json` records the `Message-ID`s already handled and is committed
+back like `reports_sent.json`, since Actions runs share no storage. Messages
+that were acted on are also flagged `\Seen`; the ledger exists for the ones
+deliberately left unread, which would otherwise be re-examined and re-logged
+every fifteen minutes forever.
+
+One limit is accepted rather than engineered away: if the git push fails after
+a reply has already gone out, the next poll re-reads that message and sends a
+second confirmation. `add` and `remove` are idempotent, so the watchlist stays
+correct and only the confirmation repeats. The push step fails the job loudly
+instead.
 
 ## What counts as a move worth reporting
 
@@ -168,7 +269,10 @@ watchlist_agent/
   research.py                      per-ticker gathering
   email_report.py                  text + HTML rendering, Gmail SMTP
   digest.py                        entry point
+  inbox.py                         watchlist commands sent by email reply
 .github/workflows/daily-digest.yml schedule + manual dispatch
+.github/workflows/inbox.yml        mailbox poll for watchlist commands
+tests/                             pytest suite (python -m pytest)
 ```
 
 ## News and filings

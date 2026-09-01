@@ -29,6 +29,13 @@ DISCLAIMER = (
     "not financial advice."
 )
 
+# A feature the reader does not know exists will not get used, so every email
+# carries the one line that explains it.
+COMMAND_HINT = (
+    'Reply to this email with "add NVDA" or "remove ROKU" to change the '
+    "watchlist. Put the command on a line of its own."
+)
+
 
 def _bullet_rows(bullets: list[Bullet], muted: str) -> str:
     """Material news and filings shown beneath the move that prompted them."""
@@ -139,7 +146,7 @@ def render_text(
             lines.append(f"  {f.ticker:<10} {f.reason}")
         lines.append("")
 
-    lines += ["-" * 68, DISCLAIMER]
+    lines += ["-" * 68, COMMAND_HINT, "", DISCLAIMER]
     return "\n".join(lines)
 
 
@@ -271,18 +278,37 @@ def render_html(
   {failures_block}
 
   <p style="margin:32px 0 0;padding-top:14px;border-top:1px solid #e5e7eb;
-            color:{muted};font-size:12px;line-height:1.5;">{escape(DISCLAIMER)}</p>
+            color:{muted};font-size:12px;line-height:1.5;">{escape(COMMAND_HINT)}<br><br>
+            {escape(DISCLAIMER)}</p>
 </div>"""
 
 
-def send_email(subject: str, text_body: str, html_body: str) -> None:
+def send_email(
+    subject: str,
+    text_body: str,
+    html_body: str,
+    *,
+    to: str | None = None,
+    in_reply_to: str | None = None,
+    references: str | None = None,
+) -> None:
+    """Send over Gmail SMTP.
+
+    ``in_reply_to`` and ``references`` thread a reply onto the message that
+    prompted it, so a watchlist confirmation lands in the conversation the
+    reader is already looking at rather than starting a new one.
+    """
     sender = gmail_address()
-    recipient = recipient_address()
+    recipient = to or recipient_address()
 
     message = EmailMessage()
     message["Subject"] = subject
     message["From"] = sender
     message["To"] = recipient
+    if in_reply_to:
+        message["In-Reply-To"] = in_reply_to
+    if references:
+        message["References"] = references
     message.set_content(text_body)
     message.add_alternative(html_body, subtype="html")
 
@@ -485,7 +511,7 @@ def render_research_text(report, dossier) -> str:
             lines.append(f"    {source.url}")
         lines.append("")
 
-    lines += ["-" * 68, RESEARCH_DISCLAIMER]
+    lines += ["-" * 68, COMMAND_HINT, "", RESEARCH_DISCLAIMER]
     return "\n".join(lines)
 
 
@@ -583,6 +609,7 @@ def render_research_html(report, dossier) -> str:
   {"".join(blocks)}
   <p style="margin:30px 0 0;padding-top:14px;border-top:1px solid #e5e7eb;
             color:{muted};font-size:12px;line-height:1.5;">
+    {escape(COMMAND_HINT)}<br><br>
     {escape(RESEARCH_DISCLAIMER)}
   </p>
 </div>"""
