@@ -1,0 +1,17 @@
+{
+  "_comment": "Message-IDs of watchlist command emails already handled, so a message left unread is not re-examined on every poll.",
+  "processed": {
+    "<2968FDDA-A3FB-4AFC-9BAC-343F869E28F1@icloud.com>": {
+      "at": "2026-09-01",
+      "outcome": "no-command"
+    },
+    "<8A6C13E8-FA3E-49C6-A001-9DE5F991A0EC@icloud.com>": {
+      "at": "2026-09-01",
+      "outcome": "applied"
+    },
+    "<AAF5A0EB-C36D-45CD-8B3D-A38D680A70CD@icloud.com>": {
+      "at": "2026-09-01",
+      "outcome": "applied"
+    }
+  }
+}
