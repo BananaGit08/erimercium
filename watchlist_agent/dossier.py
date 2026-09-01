@@ -99,6 +99,15 @@ def build(
                 "no earnings surprise history — cannot say how reliable "
                 "consensus has been for this name"
             )
+        else:
+            # Confirmed by probe: /stock/earnings carries EPS only. Revenue is
+            # the harder line to manage toward a number, so its absence is
+            # worth stating rather than leaving the reader to assume the
+            # record covers both.
+            dossier.note_gap(
+                "surprise history is EPS only — no revenue surprise on the "
+                "free tier, so the record cannot show whether revenue beat too"
+            )
 
         if dossier.market.peers:
             dossier.peer_pe = peer_comparison(finnhub, dossier.market.peers)
