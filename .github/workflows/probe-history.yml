@@ -9,6 +9,10 @@ on:
         description: "Space-separated tickers to inspect in detail (blank = source reachability probe)"
         type: string
         default: ""
+      transcripts:
+        description: "Probe earnings transcript sources and the surprise endpoint instead"
+        type: boolean
+        default: false
 
 jobs:
   probe:
@@ -23,8 +27,16 @@ jobs:
       - name: Probe
         env:
           TICKERS: ${{ inputs.tickers }}
+          TRANSCRIPTS: ${{ inputs.transcripts }}
+          FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
+          # Optional. Absent, the transcript probe reports what a key would be
+          # needed for rather than pretending the source was tested.
+          ALPHAVANTAGE_API_KEY: ${{ secrets.ALPHAVANTAGE_API_KEY }}
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
         run: |
-          if [ -n "$TICKERS" ]; then
+          if [ "$TRANSCRIPTS" = "true" ]; then
+            python tools/probe_transcripts.py $TICKERS
+          elif [ -n "$TICKERS" ]; then
             python tools/probe_ticker.py $TICKERS
           else
             python tools/probe_history.py
