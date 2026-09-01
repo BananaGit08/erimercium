@@ -703,25 +703,45 @@ def diagnose_mailbox(limit: int = 25) -> int:
     subject, body or full address reaches the log.
     """
     since = (date.today() - timedelta(days=INBOX_LOOKBACK_DAYS)).strftime("%d-%b-%Y")
+    sender_expected = command_sender()
 
     with imaplib.IMAP4_SSL(IMAP_HOST, IMAP_SSL_PORT) as imap:
         imap.login(gmail_address(), gmail_app_password())
         folder = archive_folder(imap)
-        if imap.select(f'"{folder}"')[0] != "OK":
+        if imap.select(f'"{folder}"', readonly=True)[0] != "OK":
             folder = "INBOX"
-            imap.select(folder)
+            imap.select(folder, readonly=True)
 
         log.info("logged in as %s", mask_address(gmail_address()))
-        log.info("expecting commands from %s", mask_address(command_sender()))
+        log.info("expecting commands from %s", mask_address(sender_expected))
 
+        # Every folder, not just the archive. Gmail keeps Spam and Trash out of
+        # All Mail, so a command filtered as spam is invisible to the poll and
+        # to this diagnostic alike unless each folder is asked directly.
+        log.info("--- looking for %s in every folder ---", mask_address(sender_expected))
+        typ, folders = imap.list()
+        for line in folders or []:
+            text = line.decode(errors="replace") if isinstance(line, bytes) else str(line)
+            match = re.match(r'\([^)]*\)\s+"[^"]*"\s+(.+)$', text)
+            if not match:
+                continue
+            name = match.group(1).strip().strip('"')
+            if imap.select(f'"{name}"', readonly=True)[0] != "OK":
+                log.info("  %-32s (could not open)", name)
+                continue
+            typ, found = imap.search(None, "FROM", f'"{sender_expected}"', "SINCE", since)
+            count = len(found[0].split()) if typ == "OK" and found and found[0] else 0
+            log.info("  %-32s %d message(s)", name, count)
+
+        imap.select(f'"{folder}"', readonly=True)
         typ, data = imap.search(None, "SINCE", since)
         if typ != "OK":
             log.warning("IMAP search failed: %s", typ)
             return 0
 
         numbers = data[0].split()
-        log.info("%d message(s) in %s since %s (showing last %d)",
-                 len(numbers), folder, since, min(limit, len(numbers)))
+        log.info("--- last %d of %d message(s) in %s since %s ---",
+                 min(limit, len(numbers)), len(numbers), folder, since)
 
         for number in numbers[-limit:]:
             typ, payload = imap.fetch(
