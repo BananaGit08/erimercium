@@ -21,6 +21,16 @@ ordinary prose from mutating the watchlist. A partially valid line is rejected
 outright rather than partially applied -- half-obeying a line nobody meant as a
 command is worse than ignoring it.
 
+**Recency, not unread status, decides what is examined.** The mailbox this polls
+is a person's working inbox, not a dedicated robot account. A command read by a
+human -- or merely touched by a preview pane -- before the poll runs is marked
+`\\Seen` by Gmail, and a search for unread mail would then skip it forever. So
+the poll looks at recent mail from the authorized sender regardless of read
+state and relies on the processed-ID ledger for idempotency, which is what that
+ledger was for. One exception: the "I did not understand that" reply is only
+sent for mail that was still unread, so widening the window cannot produce a
+burst of replies to messages already dealt with by hand.
+
 **Identity is checked twice.** The From address must match the configured
 sender, and Gmail's own `Authentication-Results` header must record a DMARC
 pass. A From header is forgeable by anyone who knows the address; the DMARC
@@ -39,7 +49,7 @@ import json
 import logging
 import re
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 from email.header import decode_header, make_header
 from email.message import Message
 from email.utils import parseaddr
@@ -48,6 +58,7 @@ from pathlib import Path
 
 from .config import (
     IMAP_HOST,
+    INBOX_LOOKBACK_DAYS,
     IMAP_SSL_PORT,
     MAX_REMOVALS_PER_MESSAGE,
     MAX_TICKERS_PER_MESSAGE,
@@ -281,6 +292,19 @@ def parse_commands(subject: str, body: str) -> list[Command]:
 # --- sender verification ---------------------------------------------------
 
 
+def is_unread(fetch_envelope: bytes | str) -> bool:
+    """Whether a FETCH response's FLAGS say the message is still unread.
+
+    The envelope looks like ``1 (FLAGS (\\Seen) BODY[] {2048}``. Only the
+    absence of ``\\Seen`` counts as unread; an envelope that could not be read
+    is treated as already-read, which is the conservative side -- it suppresses
+    a help reply rather than sending a spurious one.
+    """
+    if isinstance(fetch_envelope, bytes):
+        fetch_envelope = fetch_envelope.decode(errors="replace")
+    return "\\Seen" not in fetch_envelope
+
+
 def dmarc_passed(message: Message) -> bool:
     """Whether Gmail recorded a DMARC pass when it accepted the message.
 
@@ -495,10 +519,11 @@ def send_reply(plan: Plan, text: str, html: str, dry_run: bool) -> None:
 class Ledger:
     """Message-IDs already dealt with, committed back between runs.
 
-    GitHub Actions runs share no storage, so without this an unread rejected
-    message would be re-examined -- and re-logged -- every fifteen minutes
-    forever. The IMAP \\Seen flag covers messages that were acted on; this
-    covers the ones deliberately left unread.
+    This is the primary duplicate guard, not a supplement to the IMAP flags.
+    The poll searches by recency rather than read state, so the same message is
+    returned by every search inside the lookback window; only this ledger stops
+    it being answered again each time. GitHub Actions runs share no storage,
+    which is why it is committed back to the repository.
     """
 
     def __init__(self, path: Path = STATE_PATH) -> None:
@@ -541,26 +566,33 @@ def process_mailbox(dry_run: bool = False) -> int:
     watchlist = Watchlist()
     handled = 0
 
+    sender = command_sender()
+    since = (date.today() - timedelta(days=INBOX_LOOKBACK_DAYS)).strftime("%d-%b-%Y")
+
     with imaplib.IMAP4_SSL(IMAP_HOST, IMAP_SSL_PORT) as imap:
         imap.login(gmail_address(), gmail_app_password())
         imap.select("INBOX")
-        typ, data = imap.search(None, "UNSEEN")
+        # Read state is deliberately not part of this query -- see the module
+        # docstring. Narrowing to the one authorized sender keeps the window
+        # small even though it spans days rather than "since last read".
+        typ, data = imap.search(None, "FROM", f'"{sender}"', "SINCE", since)
         if typ != "OK":
             log.warning("IMAP search failed: %s", typ)
             return 0
 
         numbers = data[0].split()
-        log.info("%d unread message(s) to consider", len(numbers))
+        log.info("%d message(s) from %s since %s", len(numbers), sender, since)
 
         for number in numbers:
             # PEEK, so examining a message we will not act on does not silently
             # mark it read and hide it from the person who has to look at it.
-            typ, payload = imap.fetch(number, "(BODY.PEEK[])")
+            typ, payload = imap.fetch(number, "(FLAGS BODY.PEEK[])")
             if typ != "OK" or not payload or not isinstance(payload[0], tuple):
                 log.warning("could not fetch message %s", number.decode())
                 continue
 
-            plan = plan_message(payload[0][1], watchlist.tickers, command_sender())
+            was_unread = is_unread(payload[0][0])
+            plan = plan_message(payload[0][1], watchlist.tickers, sender)
             if ledger.seen(plan.message_id):
                 continue
 
@@ -575,9 +607,17 @@ def process_mailbox(dry_run: bool = False) -> int:
             elif plan.commands:
                 outcomes = apply_commands(plan.commands, watchlist)
                 text, markup = reply_body(plan, outcomes, watchlist.tickers)
-            else:
+            elif was_unread:
                 text, markup = reply_body(plan, [], watchlist.tickers)
                 log.info("no command found in message from %s", plan.sender)
+            else:
+                # Already-read mail with no command is ordinary correspondence
+                # the reader has dealt with. Answering it because the search
+                # window widened would be noise, not help.
+                log.info("skipping read message with no command")
+                if not dry_run:
+                    ledger.record(plan.message_id, "no-command")
+                continue
 
             send_reply(plan, text, markup, dry_run)
             handled += 1

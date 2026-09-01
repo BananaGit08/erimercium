@@ -60,6 +60,12 @@ IMAP_SSL_PORT = 993
 MAX_TICKERS_PER_MESSAGE = 25
 MAX_REMOVALS_PER_MESSAGE = 10
 
+# How far back the mailbox poll looks. The mailbox is a person's working inbox,
+# not a dedicated robot account, so a command can be read by a human before the
+# poll ever sees it -- keying off unread status loses it permanently. Recency
+# plus the processed-ID ledger is what makes the poll reliable instead.
+INBOX_LOOKBACK_DAYS = 2
+
 # SEC asks for no more than 10 requests/second and a descriptive User-Agent.
 SEC_MAX_RPS = 8
 

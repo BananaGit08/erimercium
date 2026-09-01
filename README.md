@@ -107,6 +107,19 @@ understands, commits `watchlist.json` back, and answers in the same thread
 saying exactly what changed. Turnaround is therefore up to about a quarter of
 an hour, not instant.
 
+**Read state does not decide what gets examined.** The mailbox is the account
+the digests are sent *from*, which is a person's working inbox rather than a
+dedicated robot account. The first version searched for unread mail, and a
+command read by a human -- or merely touched by a preview pane -- before the
+poll ran was skipped permanently. That is exactly what happened on the first
+live test. The poll now looks at mail from the authorized sender within the
+last `INBOX_LOOKBACK_DAYS` days regardless of whether it has been read, and
+leans on the processed-ID ledger for idempotency.
+
+Read state still gates one thing: the "I did not understand that" reply is only
+sent for mail that was still unread. Widening the search window therefore
+cannot produce a burst of replies to correspondence already handled by hand.
+
 **A command must be its whole line.** `add NVDA` is a command; `could you add
 NVDA when you get a chance` is not. Anchoring both ends is what stops ordinary
 prose from editing the watchlist, and a line that is only partly valid is
@@ -165,10 +178,11 @@ worst available outcome.
 ### Duplicates
 
 `inbox_state.json` records the `Message-ID`s already handled and is committed
-back like `reports_sent.json`, since Actions runs share no storage. Messages
-that were acted on are also flagged `\Seen`; the ledger exists for the ones
-deliberately left unread, which would otherwise be re-examined and re-logged
-every fifteen minutes forever.
+back like `reports_sent.json`, since Actions runs share no storage. This is the
+primary duplicate guard rather than a supplement to the IMAP flags: because the
+poll searches by recency, the same message comes back from every search inside
+the lookback window, and only the ledger stops it being answered each time.
+Handled messages are still flagged `\Seen` as well.
 
 One limit is accepted rather than engineered away: if the git push fails after
 a reply has already gone out, the next poll re-reads that message and sends a

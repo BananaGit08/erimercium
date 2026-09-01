@@ -14,6 +14,7 @@ from watchlist_agent.inbox import (
     Command,
     Outcome,
     check_guard_rails,
+    is_unread,
     parse_commands,
     plan_message,
     reply_body,
@@ -362,3 +363,25 @@ def test_html_reply_escapes_its_content():
     result = plan("add NVDA")
     _, markup = reply_body(result, [Outcome("NVDA", "added")], HELD)
     assert "<script>" not in markup
+
+
+# --- read state ------------------------------------------------------------
+#
+# The poll searches by recency, not by unread status, because this mailbox is a
+# person's working inbox: a command read by a human before the poll runs would
+# otherwise be skipped forever. Read state still gates the help reply.
+
+
+def test_unread_envelope_detected():
+    assert is_unread(b"1 (FLAGS (\\Recent) BODY[] {2048}")
+    assert is_unread(b"1 (FLAGS () BODY[] {2048}")
+
+
+def test_read_envelope_detected():
+    assert not is_unread(b"1 (FLAGS (\\Seen) BODY[] {2048}")
+    assert not is_unread(b"1 (FLAGS (\\Seen \\Answered) BODY[] {2048}")
+
+
+def test_unreadable_envelope_treated_as_read():
+    """Conservative: suppress a help reply rather than send a spurious one."""
+    assert not is_unread(b"\xff\xfe garbage \\Seen")
