@@ -12,6 +12,7 @@ import pytest
 
 from watchlist_agent.inbox import (
     Command,
+    archive_folder,
     Outcome,
     check_guard_rails,
     is_unread,
@@ -385,3 +386,41 @@ def test_read_envelope_detected():
 def test_unreadable_envelope_treated_as_read():
     """Conservative: suppress a help reply rather than send a spurious one."""
     assert not is_unread(b"\xff\xfe garbage \\Seen")
+
+
+# --- locating Gmail's archive ----------------------------------------------
+#
+# INBOX is a label in Gmail, not a place. An archived command is gone from
+# INBOX but still in the archive, so that is what the poll selects.
+
+
+class _FakeIMAP:
+    def __init__(self, lines, typ="OK"):
+        self._lines = lines
+        self._typ = typ
+
+    def list(self):
+        return self._typ, self._lines
+
+
+def test_archive_folder_found_by_flag():
+    imap = _FakeIMAP([
+        rb'(\HasNoChildren) "/" "INBOX"',
+        rb'(\HasNoChildren \All) "/" "[Gmail]/All Mail"',
+        rb'(\HasNoChildren \Sent) "/" "[Gmail]/Sent Mail"',
+    ])
+    assert archive_folder(imap) == "[Gmail]/All Mail"
+
+
+def test_archive_folder_name_is_not_assumed_to_be_english():
+    imap = _FakeIMAP([rb'(\All \HasNoChildren) "/" "[Google Mail]/Alle Nachrichten"'])
+    assert archive_folder(imap) == "[Google Mail]/Alle Nachrichten"
+
+
+def test_archive_folder_falls_back_to_inbox_when_absent():
+    imap = _FakeIMAP([rb'(\HasNoChildren) "/" "INBOX"'])
+    assert archive_folder(imap) == "INBOX"
+
+
+def test_archive_folder_falls_back_when_list_fails():
+    assert archive_folder(_FakeIMAP(None, typ="NO")) == "INBOX"

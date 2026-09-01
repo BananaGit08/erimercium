@@ -107,6 +107,16 @@ understands, commits `watchlist.json` back, and answers in the same thread
 saying exactly what changed. Turnaround is therefore up to about a quarter of
 an hour, not instant.
 
+**The poll reads Gmail's archive, not the inbox.** IMAP's INBOX is not a place
+in Gmail, it is a label. Archiving a message -- by hand, by a filter, or by the
+mobile app's swipe -- removes that label, and the message disappears from INBOX
+while still existing in the archive. On the first live test the reader watched a
+command land in the inbox and then vanish, and three consecutive polls of INBOX
+found nothing. The poll now selects the folder advertising the `\All`
+special-use flag, located by flag rather than by name because the name is
+localised. Gmail excludes Spam and Trash from that folder, so a command
+filtered as spam is still invisible -- no folder sees everything.
+
 **Read state does not decide what gets examined.** The mailbox is the account
 the digests are sent *from*, which is a person's working inbox rather than a
 dedicated robot account. The first version searched for unread mail, and a

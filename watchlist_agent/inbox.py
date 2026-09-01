@@ -292,6 +292,34 @@ def parse_commands(subject: str, body: str) -> list[Command]:
 # --- sender verification ---------------------------------------------------
 
 
+def archive_folder(imap: imaplib.IMAP4) -> str:
+    """Gmail's archive folder, located by its ``\\All`` special-use flag.
+
+    IMAP's INBOX is not a place in Gmail, it is a label. Archiving a message --
+    by hand, by a filter, or by the mobile app's swipe -- removes that label,
+    and the message vanishes from INBOX while still existing perfectly well in
+    the archive. On the first live test the reader watched a command land in
+    the inbox and then disappear, and three consecutive polls of INBOX found
+    nothing, which is exactly what that looks like from here.
+
+    The folder is found by flag rather than by name because the name is
+    localised: "[Gmail]/All Mail" in English, "[Google Mail]/Alle Nachrichten"
+    elsewhere. Note that Gmail excludes Spam and Trash from it, so a command
+    filtered as spam is still invisible -- there is no folder that sees
+    everything.
+    """
+    typ, data = imap.list()
+    if typ == "OK":
+        for line in data or []:
+            text = line.decode(errors="replace") if isinstance(line, bytes) else str(line)
+            if "\\All" in text:
+                match = re.match(r'\([^)]*\)\s+"[^"]*"\s+(.+)$', text)
+                if match:
+                    return match.group(1).strip().strip('"')
+    log.warning("no \\All folder advertised; falling back to INBOX")
+    return "INBOX"
+
+
 def is_unread(fetch_envelope: bytes | str) -> bool:
     """Whether a FETCH response's FLAGS say the message is still unread.
 
@@ -571,7 +599,12 @@ def process_mailbox(dry_run: bool = False) -> int:
 
     with imaplib.IMAP4_SSL(IMAP_HOST, IMAP_SSL_PORT) as imap:
         imap.login(gmail_address(), gmail_app_password())
-        imap.select("INBOX")
+        folder = archive_folder(imap)
+        typ, _ = imap.select(f'"{folder}"')
+        if typ != "OK":
+            log.warning("could not select %s; falling back to INBOX", folder)
+            folder = "INBOX"
+            imap.select(folder)
         # Read state is deliberately not part of this query -- see the module
         # docstring. Narrowing to the one authorized sender keeps the window
         # small even though it spans days rather than "since last read".
@@ -581,7 +614,8 @@ def process_mailbox(dry_run: bool = False) -> int:
             return 0
 
         numbers = data[0].split()
-        log.info("%d message(s) from %s since %s", len(numbers), sender, since)
+        log.info("%d message(s) in %s from %s since %s",
+                 len(numbers), folder, sender, since)
 
         for number in numbers:
             # PEEK, so examining a message we will not act on does not silently
@@ -593,7 +627,17 @@ def process_mailbox(dry_run: bool = False) -> int:
 
             was_unread = is_unread(payload[0][0])
             plan = plan_message(payload[0][1], watchlist.tickers, sender)
+            # Deliberately not the subject or body: these logs are public on a
+            # public repository, and the shape of a message is enough to debug.
+            log.info(
+                "message %s: %s, %s, %d command(s)",
+                plan.message_id or "(no id)",
+                "unread" if was_unread else "read",
+                "authorized" if plan.authorized else f"rejected ({plan.auth_reason})",
+                len(plan.commands),
+            )
             if ledger.seen(plan.message_id):
+                log.info("  already handled; skipping")
                 continue
 
             if not plan.authorized:
