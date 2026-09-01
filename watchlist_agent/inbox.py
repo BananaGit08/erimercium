@@ -21,6 +21,16 @@ ordinary prose from mutating the watchlist. A partially valid line is rejected
 outright rather than partially applied -- half-obeying a line nobody meant as a
 command is worse than ignoring it.
 
+**Recency, not unread status, decides what is examined.** The mailbox this polls
+is a person's working inbox, not a dedicated robot account. A command read by a
+human -- or merely touched by a preview pane -- before the poll runs is marked
+`\\Seen` by Gmail, and a search for unread mail would then skip it forever. So
+the poll looks at recent mail from the authorized sender regardless of read
+state and relies on the processed-ID ledger for idempotency, which is what that
+ledger was for. One exception: the "I did not understand that" reply is only
+sent for mail that was still unread, so widening the window cannot produce a
+burst of replies to messages already dealt with by hand.
+
 **Identity is checked twice.** The From address must match the configured
 sender, and Gmail's own `Authentication-Results` header must record a DMARC
 pass. A From header is forgeable by anyone who knows the address; the DMARC
@@ -39,7 +49,7 @@ import json
 import logging
 import re
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 from email.header import decode_header, make_header
 from email.message import Message
 from email.utils import parseaddr
@@ -48,6 +58,7 @@ from pathlib import Path
 
 from .config import (
     IMAP_HOST,
+    INBOX_LOOKBACK_DAYS,
     IMAP_SSL_PORT,
     MAX_REMOVALS_PER_MESSAGE,
     MAX_TICKERS_PER_MESSAGE,
@@ -281,6 +292,62 @@ def parse_commands(subject: str, body: str) -> list[Command]:
 # --- sender verification ---------------------------------------------------
 
 
+def archive_folder(imap: imaplib.IMAP4) -> str:
+    """Gmail's archive folder, located by its ``\\All`` special-use flag.
+
+    IMAP's INBOX is not a place in Gmail, it is a label. Archiving a message --
+    by hand, by a filter, or by the mobile app's swipe -- removes that label,
+    and the message vanishes from INBOX while still existing perfectly well in
+    the archive. On the first live test the reader watched a command land in
+    the inbox and then disappear, and three consecutive polls of INBOX found
+    nothing, which is exactly what that looks like from here.
+
+    The folder is found by flag rather than by name because the name is
+    localised: "[Gmail]/All Mail" in English, "[Google Mail]/Alle Nachrichten"
+    elsewhere. Note that Gmail excludes Spam and Trash from it, so a command
+    filtered as spam is still invisible -- there is no folder that sees
+    everything.
+    """
+    typ, data = imap.list()
+    if typ == "OK":
+        for line in data or []:
+            text = line.decode(errors="replace") if isinstance(line, bytes) else str(line)
+            if "\\All" in text:
+                match = re.match(r'\([^)]*\)\s+"[^"]*"\s+(.+)$', text)
+                if match:
+                    return match.group(1).strip().strip('"')
+    log.warning("no \\All folder advertised; falling back to INBOX")
+    return "INBOX"
+
+
+def mask_address(address: str) -> str:
+    """An address recognisable to its owner but not harvestable from a log.
+
+    These logs are public on a public repository. The domain is kept because
+    telling an iCloud address from a Gmail one is the whole point of the
+    diagnostic; the local part is not.
+    """
+    local, _, domain = address.partition("@")
+    if not domain:
+        return "(no address)"
+    if len(local) <= 2:
+        return f"{local[:1]}*@{domain}"
+    return f"{local[0]}***{local[-1]}@{domain}"
+
+
+def is_unread(fetch_envelope: bytes | str) -> bool:
+    """Whether a FETCH response's FLAGS say the message is still unread.
+
+    The envelope looks like ``1 (FLAGS (\\Seen) BODY[] {2048}``. Only the
+    absence of ``\\Seen`` counts as unread; an envelope that could not be read
+    is treated as already-read, which is the conservative side -- it suppresses
+    a help reply rather than sending a spurious one.
+    """
+    if isinstance(fetch_envelope, bytes):
+        fetch_envelope = fetch_envelope.decode(errors="replace")
+    return "\\Seen" not in fetch_envelope
+
+
 def dmarc_passed(message: Message) -> bool:
     """Whether Gmail recorded a DMARC pass when it accepted the message.
 
@@ -495,10 +562,11 @@ def send_reply(plan: Plan, text: str, html: str, dry_run: bool) -> None:
 class Ledger:
     """Message-IDs already dealt with, committed back between runs.
 
-    GitHub Actions runs share no storage, so without this an unread rejected
-    message would be re-examined -- and re-logged -- every fifteen minutes
-    forever. The IMAP \\Seen flag covers messages that were acted on; this
-    covers the ones deliberately left unread.
+    This is the primary duplicate guard, not a supplement to the IMAP flags.
+    The poll searches by recency rather than read state, so the same message is
+    returned by every search inside the lookback window; only this ledger stops
+    it being answered again each time. GitHub Actions runs share no storage,
+    which is why it is committed back to the repository.
     """
 
     def __init__(self, path: Path = STATE_PATH) -> None:
@@ -541,27 +609,50 @@ def process_mailbox(dry_run: bool = False) -> int:
     watchlist = Watchlist()
     handled = 0
 
+    sender = command_sender()
+    since = (date.today() - timedelta(days=INBOX_LOOKBACK_DAYS)).strftime("%d-%b-%Y")
+
     with imaplib.IMAP4_SSL(IMAP_HOST, IMAP_SSL_PORT) as imap:
         imap.login(gmail_address(), gmail_app_password())
-        imap.select("INBOX")
-        typ, data = imap.search(None, "UNSEEN")
+        folder = archive_folder(imap)
+        typ, _ = imap.select(f'"{folder}"')
+        if typ != "OK":
+            log.warning("could not select %s; falling back to INBOX", folder)
+            folder = "INBOX"
+            imap.select(folder)
+        # Read state is deliberately not part of this query -- see the module
+        # docstring. Narrowing to the one authorized sender keeps the window
+        # small even though it spans days rather than "since last read".
+        typ, data = imap.search(None, "FROM", f'"{sender}"', "SINCE", since)
         if typ != "OK":
             log.warning("IMAP search failed: %s", typ)
             return 0
 
         numbers = data[0].split()
-        log.info("%d unread message(s) to consider", len(numbers))
+        log.info("%d message(s) in %s from %s since %s",
+                 len(numbers), folder, sender, since)
 
         for number in numbers:
             # PEEK, so examining a message we will not act on does not silently
             # mark it read and hide it from the person who has to look at it.
-            typ, payload = imap.fetch(number, "(BODY.PEEK[])")
+            typ, payload = imap.fetch(number, "(FLAGS BODY.PEEK[])")
             if typ != "OK" or not payload or not isinstance(payload[0], tuple):
                 log.warning("could not fetch message %s", number.decode())
                 continue
 
-            plan = plan_message(payload[0][1], watchlist.tickers, command_sender())
+            was_unread = is_unread(payload[0][0])
+            plan = plan_message(payload[0][1], watchlist.tickers, sender)
+            # Deliberately not the subject or body: these logs are public on a
+            # public repository, and the shape of a message is enough to debug.
+            log.info(
+                "message %s: %s, %s, %d command(s)",
+                plan.message_id or "(no id)",
+                "unread" if was_unread else "read",
+                "authorized" if plan.authorized else f"rejected ({plan.auth_reason})",
+                len(plan.commands),
+            )
             if ledger.seen(plan.message_id):
+                log.info("  already handled; skipping")
                 continue
 
             if not plan.authorized:
@@ -575,9 +666,17 @@ def process_mailbox(dry_run: bool = False) -> int:
             elif plan.commands:
                 outcomes = apply_commands(plan.commands, watchlist)
                 text, markup = reply_body(plan, outcomes, watchlist.tickers)
-            else:
+            elif was_unread:
                 text, markup = reply_body(plan, [], watchlist.tickers)
                 log.info("no command found in message from %s", plan.sender)
+            else:
+                # Already-read mail with no command is ordinary correspondence
+                # the reader has dealt with. Answering it because the search
+                # window widened would be noise, not help.
+                log.info("skipping read message with no command")
+                if not dry_run:
+                    ledger.record(plan.message_id, "no-command")
+                continue
 
             send_reply(plan, text, markup, dry_run)
             handled += 1
@@ -595,6 +694,72 @@ def process_mailbox(dry_run: bool = False) -> int:
     return handled
 
 
+def diagnose_mailbox(limit: int = 25) -> int:
+    """List recent senders without acting on anything.
+
+    For answering the only two questions a silent mailbox poses: are we logged
+    into the mailbox the reader is actually looking at, and what address is the
+    mail really coming from? Headers only -- no bodies are fetched, and no
+    subject, body or full address reaches the log.
+    """
+    since = (date.today() - timedelta(days=INBOX_LOOKBACK_DAYS)).strftime("%d-%b-%Y")
+    sender_expected = command_sender()
+
+    with imaplib.IMAP4_SSL(IMAP_HOST, IMAP_SSL_PORT) as imap:
+        imap.login(gmail_address(), gmail_app_password())
+        folder = archive_folder(imap)
+        if imap.select(f'"{folder}"', readonly=True)[0] != "OK":
+            folder = "INBOX"
+            imap.select(folder, readonly=True)
+
+        log.info("logged in as %s", mask_address(gmail_address()))
+        log.info("expecting commands from %s", mask_address(sender_expected))
+
+        # Every folder, not just the archive. Gmail keeps Spam and Trash out of
+        # All Mail, so a command filtered as spam is invisible to the poll and
+        # to this diagnostic alike unless each folder is asked directly.
+        log.info("--- looking for %s in every folder ---", mask_address(sender_expected))
+        typ, folders = imap.list()
+        for line in folders or []:
+            text = line.decode(errors="replace") if isinstance(line, bytes) else str(line)
+            match = re.match(r'\([^)]*\)\s+"[^"]*"\s+(.+)$', text)
+            if not match:
+                continue
+            name = match.group(1).strip().strip('"')
+            if imap.select(f'"{name}"', readonly=True)[0] != "OK":
+                log.info("  %-32s (could not open)", name)
+                continue
+            typ, found = imap.search(None, "FROM", f'"{sender_expected}"', "SINCE", since)
+            count = len(found[0].split()) if typ == "OK" and found and found[0] else 0
+            log.info("  %-32s %d message(s)", name, count)
+
+        imap.select(f'"{folder}"', readonly=True)
+        typ, data = imap.search(None, "SINCE", since)
+        if typ != "OK":
+            log.warning("IMAP search failed: %s", typ)
+            return 0
+
+        numbers = data[0].split()
+        log.info("--- last %d of %d message(s) in %s since %s ---",
+                 min(limit, len(numbers)), len(numbers), folder, since)
+
+        for number in numbers[-limit:]:
+            typ, payload = imap.fetch(
+                number, "(FLAGS BODY.PEEK[HEADER.FIELDS (FROM DATE)])"
+            )
+            if typ != "OK" or not payload or not isinstance(payload[0], tuple):
+                continue
+            headers = email.message_from_bytes(payload[0][1])
+            _, address = parseaddr(header_text(headers, "From"))
+            log.info(
+                "  %s  %s  %s",
+                "unread" if is_unread(payload[0][0]) else "read  ",
+                mask_address(address),
+                header_text(headers, "Date"),
+            )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Apply watchlist changes sent by email.")
     parser.add_argument(
@@ -602,11 +767,18 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Print replies instead of sending them, and leave messages unread.",
     )
+    parser.add_argument(
+        "--diagnose",
+        action="store_true",
+        help="List recent senders and read state, acting on nothing.",
+    )
     args = parser.parse_args(argv)
 
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
     )
+    if args.diagnose:
+        return diagnose_mailbox()
     process_mailbox(dry_run=args.dry_run)
     return 0
 
