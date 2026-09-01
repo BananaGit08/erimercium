@@ -217,7 +217,6 @@ def probe_sec(ticker: str) -> None:
     items = recent.get("items", [])
     accessions = recent.get("accessionNumber", [])
     dates = recent.get("filingDate", [])
-    primary = recent.get("primaryDocument", [])
 
     for i, form in enumerate(forms):
         if form != "8-K" or "2.02" not in (items[i] if i < len(items) else ""):

@@ -9,8 +9,6 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
-import pytest
-
 from watchlist_agent.call_takeaways import CallMaterial, parse, to_prompt_context
 from watchlist_agent.calls import close_expired, due_for_calls
 from watchlist_agent.earnings import EarningsEvent
