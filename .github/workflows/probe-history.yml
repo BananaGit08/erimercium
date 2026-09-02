@@ -13,6 +13,10 @@ on:
         description: "Probe earnings transcript sources and the surprise endpoint instead"
         type: boolean
         default: false
+      quarters:
+        description: "Space-separated quarter labels to check alignment, e.g. 2026Q1 2026Q2"
+        type: string
+        default: ""
 
 jobs:
   probe:
@@ -33,6 +37,8 @@ jobs:
           # needed for rather than pretending the source was tested.
           ALPHAVANTAGE_API_KEY: ${{ secrets.ALPHAVANTAGE_API_KEY }}
           FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+          # Space-separated quarter labels to test alignment, e.g. "2026Q1 2026Q2".
+          ALPHA_QUARTERS: ${{ inputs.quarters }}
         run: |
           if [ "$TRANSCRIPTS" = "true" ]; then
             python tools/probe_transcripts.py $TICKERS

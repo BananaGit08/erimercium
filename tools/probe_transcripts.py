@@ -144,6 +144,47 @@ def probe_finnhub(ticker: str) -> None:
 ALPHA_PACE_SECONDS = 1.5
 
 
+def probe_alpha_quarters(ticker: str, quarters: list[str]) -> None:
+    """Which call does each quarter label actually return?
+
+    The whole feature turns on this. Finnhub labels Adobe's June-quarter report
+    2026Q2; the first probe asked Alpha Vantage for 2026Q1 and got a full
+    transcript back. If the two providers label quarters differently -- fiscal
+    against calendar, or off by one -- the pipeline would attach the wrong
+    call's Q&A to a quarter, or find nothing and fall back to release-only
+    forever. Both fail silently, which is the worst shape a bug can take.
+
+    So ask for several and print enough of each to identify the call. Speakers
+    almost always name the period in their opening line.
+    """
+    key = os.environ.get("ALPHAVANTAGE_API_KEY", "").strip()
+    if not key:
+        print("  ALPHAVANTAGE_API_KEY not set -- cannot check quarter alignment")
+        return
+
+    for quarter in quarters:
+        time.sleep(ALPHA_PACE_SECONDS)
+        payload = get(
+            f"alphavantage quarter={quarter}",
+            ALPHA,
+            {"function": "EARNINGS_CALL_TRANSCRIPT", "symbol": ticker,
+             "quarter": quarter, "apikey": key},
+        )
+        if not isinstance(payload, dict):
+            continue
+        speech = payload.get("transcript") or []
+        total = sum(words(s.get("content", "")) for s in speech if isinstance(s, dict))
+        print(f"      -> {len(speech)} segments, ~{total} words, "
+              f"symbol={payload.get('symbol')} quarter={payload.get('quarter')}")
+        # The opening remarks name the period nearly every time.
+        for segment in speech[:4]:
+            content = re.sub(r"\s+", " ", segment.get("content", "")).strip()
+            if not content:
+                continue
+            print(f"      -> {segment.get('speaker','?')} ({segment.get('title','?')}): "
+                  f"{content[:190]!r}")
+
+
 def probe_alpha(ticker: str) -> None:
     key = os.environ.get("ALPHAVANTAGE_API_KEY", "").strip() or "demo"
     note = "" if key != "demo" else "  (no key set -- using 'demo', which only serves fixed symbols)"
@@ -264,6 +305,10 @@ def main() -> int:
         probe_fmp(ticker)
         print("\n-- SEC 8-K Item 2.02 --")
         probe_sec(ticker)
+        quarters = os.environ.get("ALPHA_QUARTERS", "").split()
+        if quarters:
+            print("\n-- Alpha Vantage quarter alignment --")
+            probe_alpha_quarters(ticker, quarters)
     return 0
 
 
