@@ -5,7 +5,9 @@
     "ABNB": "2026-08-31",
     "ADBE": "2026-08-31",
     "AEO": "2026-09-01",
-    "AFRM": "2026-09-01"
+    "AFRM": "2026-09-01",
+    "AMD": "2026-09-02",
+    "AMZN": "2026-09-02"
   },
   "calls": {
     "AFRM": {
@@ -46,6 +48,13 @@
     }
   },
   "earnings": {
+    "AEO": {
+      "2027Q2": {
+        "grade": "C+",
+        "sent": "2026-09-02",
+        "sentiment": "- Consensus rating is Hold/Neutral, with recent actions skewing cautious: Citi lowered its target to $18 from $24 and BofA reinstated an Underperform rating in mid-August, while Goldman Sachs cut its target to $22 from $25 while keeping Neutral.\n- Not every move has been negative"
+      }
+    },
     "ASAN": {
       "2027Q2": "2026-08-31"
     },
@@ -60,6 +69,13 @@
     },
     "HPE": {
       "2026Q3": "2026-08-31"
+    },
+    "LULU": {
+      "2027Q2": {
+        "grade": "C",
+        "sent": "2026-09-02",
+        "sentiment": "- Sentiment has been drifting more cautious into the print: as of late August the average rating had moved to \"Reduce\" per MarketBeat's tracking, a step down from the \"Hold\" consensus that had prevailed earlier in the year.\n- Cuts have outnumbered raises recently \u2014 Jefferies reit"
+      }
     },
     "PANW": {
       "2026Q4": "2026-08-31"
