@@ -69,9 +69,20 @@ def to_text(markup: str) -> str:
     return text.strip()
 
 
+# EDGAR puts machinery alongside the documents: an index page, a header dump, a
+# cover sheet. They are HTML, they are long enough to pass a word count, and one
+# of them was picked as Dell's "press release" on the first live run -- the
+# report was written from filing metadata. Name them so the fallback cannot.
+_NOT_A_DOCUMENT = re.compile(r"index|header|\.xsd$|^R\d+\.htm", re.IGNORECASE)
+
+
 def _looks_like_exhibit(name: str) -> bool:
     flattened = name.lower().replace("-", "").replace("_", "")
     return "ex99" in flattened and name.lower().endswith((".htm", ".html", ".txt"))
+
+
+def _plausible(name: str) -> bool:
+    return name.lower().endswith((".htm", ".html", ".txt")) and not _NOT_A_DOCUMENT.search(name)
 
 
 def fetch(
@@ -128,13 +139,19 @@ def fetch(
             log.warning("%s: filing index unusable for %s: %s", ticker, accession, exc)
             return None
 
-        # EX-99.1 is where the release lives by convention; fall back to the
-        # largest readable document rather than giving up on a filer who names
-        # their exhibits differently.
+        # EX-99.1 is where the release lives by convention. Where a filer names
+        # exhibits differently, fall back to real documents only -- never
+        # EDGAR's own index and header pages, which are HTML and long enough to
+        # look like a release until you read one.
         candidates = [n for n in names if _looks_like_exhibit(n)] or [
-            n for n in names if n.lower().endswith((".htm", ".html"))
+            n for n in names if _plausible(n)
         ]
-        for name in candidates[:2]:
+
+        # Take the longest of the first few rather than the first that clears
+        # the floor: a cover page can pass a word count, and the release is
+        # reliably the substantial document in the filing.
+        best: EarningsRelease | None = None
+        for name in candidates[:3]:
             try:
                 throttle()
                 doc = session.get(f"{base}/{name}", timeout=HTTP_TIMEOUT_SECONDS)
@@ -146,15 +163,19 @@ def fetch(
             text = to_text(doc.text)
             if len(re.findall(r"\w+", text)) < MIN_RELEASE_WORDS:
                 continue
-            release = EarningsRelease(
+            candidate = EarningsRelease(
                 ticker=ticker, filed=filed, accession=accession,
                 url=f"{base}/{name}", text=text,
             )
+            if best is None or candidate.words > best.words:
+                best = candidate
+
+        if best is not None:
             log.info(
-                "%s earnings release: %s filed %s, %d words",
-                ticker, accession, filed, release.words,
+                "%s earnings release: %s filed %s, %d words, %s",
+                ticker, accession, filed, best.words, best.url.rsplit("/", 1)[-1],
             )
-            return release
+            return best
         log.info("%s: 8-K %s had no readable release exhibit", ticker, accession)
         return None
 

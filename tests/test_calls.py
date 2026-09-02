@@ -271,3 +271,37 @@ def test_source_reflects_what_was_actually_used():
         transcript=Transcript("AAPL", "2026Q3", [Segment("A", "CEO", "x")]),
     )
     assert with_transcript.source == "transcript"
+
+
+# --- choosing the right document out of a filing ---------------------------
+#
+# On the first live run Dell's "press release" was EDGAR's own index-header
+# page: HTML, long enough to pass a word count, and entirely filing metadata.
+
+
+from watchlist_agent.release import _looks_like_exhibit, _plausible  # noqa: E402
+
+
+def test_the_conventional_exhibit_is_recognised():
+    assert _looks_like_exhibit("ex991q426earningsrelease.htm")
+    assert _looks_like_exhibit("a8-kex991q3202606272026.htm")
+    assert _looks_like_exhibit("adbeex991q226.htm")
+
+
+def test_edgar_machinery_is_never_a_candidate():
+    for name in (
+        "0001571996-26-000039-index-headers.html",
+        "0001571996-26-000039-index.htm",
+        "R2.htm",
+        "form8k.xsd",
+    ):
+        assert not _plausible(name), name
+
+
+def test_an_unconventionally_named_document_is_still_allowed():
+    assert _plausible("dell-q2fy27results.htm")
+    assert _plausible("pressrelease.txt")
+
+
+def test_a_non_document_is_not_plausible():
+    assert not _plausible("logo.jpg")
