@@ -16,8 +16,20 @@
         "source": "missed"
       }
     },
+    "AVGO": {
+      "2026Q3": {
+        "at": "2026-09-02",
+        "source": "release"
+      }
+    },
     "DELL": {
       "2027Q2": {
+        "at": "2026-09-02",
+        "source": "release"
+      }
+    },
+    "HPE": {
+      "2026Q3": {
         "at": "2026-09-02",
         "source": "release"
       }
@@ -36,6 +48,12 @@
     },
     "PANW": {
       "2026Q4": {
+        "at": "2026-09-02",
+        "source": "release"
+      }
+    },
+    "SNOW": {
+      "2027Q2": {
         "at": "2026-09-02",
         "source": "release"
       }
