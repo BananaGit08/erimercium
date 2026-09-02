@@ -18,6 +18,7 @@ import json
 import os
 import re
 import sys
+import time
 
 import requests
 
@@ -136,15 +137,23 @@ def probe_finnhub(ticker: str) -> None:
 # --- 2. Alpha Vantage -----------------------------------------------------
 
 
+# Alpha Vantage's free tier throttles at one request per second and answers a
+# breach with a 200 and an advisory string rather than a 429 -- which reads
+# exactly like a paywall unless the calls are spaced. The first run with a real
+# key was thrown away to this.
+ALPHA_PACE_SECONDS = 1.5
+
+
 def probe_alpha(ticker: str) -> None:
     key = os.environ.get("ALPHAVANTAGE_API_KEY", "").strip() or "demo"
     note = "" if key != "demo" else "  (no key set -- using 'demo', which only serves fixed symbols)"
     print(f"  alpha vantage key: {'set' if key != 'demo' else 'demo'}{note}")
+    time.sleep(ALPHA_PACE_SECONDS)
     payload = get(
         "alphavantage EARNINGS_CALL_TRANSCRIPT",
         ALPHA,
         {"function": "EARNINGS_CALL_TRANSCRIPT", "symbol": ticker,
-         "quarter": "2025Q1", "apikey": key},
+         "quarter": os.environ.get("ALPHA_QUARTER", "2026Q1"), "apikey": key},
     )
     if isinstance(payload, dict):
         speech = payload.get("transcript") or []
@@ -153,6 +162,7 @@ def probe_alpha(ticker: str) -> None:
         if speech:
             print(f"      -> first segment keys: {sorted(speech[0])}")
 
+    time.sleep(ALPHA_PACE_SECONDS)
     get("alphavantage EARNINGS (surprise history)", ALPHA,
         {"function": "EARNINGS", "symbol": ticker, "apikey": key})
 
@@ -207,7 +217,6 @@ def probe_sec(ticker: str) -> None:
     items = recent.get("items", [])
     accessions = recent.get("accessionNumber", [])
     dates = recent.get("filingDate", [])
-    primary = recent.get("primaryDocument", [])
 
     for i, form in enumerate(forms):
         if form != "8-K" or "2.02" not in (items[i] if i < len(items) else ""):

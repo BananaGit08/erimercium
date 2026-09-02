@@ -39,6 +39,7 @@ class ReportState:
                 "baseline": {},
                 "earnings": {},
                 "events": {},
+                "calls": {},
             }
         self._dirty = False
 
@@ -54,10 +55,56 @@ class ReportState:
     def has_earnings(self, ticker: str, period: str) -> bool:
         return period in self._doc.setdefault("earnings", {}).get(ticker, {})
 
-    def record_earnings(self, ticker: str, period: str, when: date | None = None) -> None:
-        self._doc.setdefault("earnings", {}).setdefault(ticker, {})[period] = (
-            when or date.today()
-        ).isoformat()
+    def record_earnings(
+        self,
+        ticker: str,
+        period: str,
+        when: date | None = None,
+        expectation: dict | None = None,
+    ) -> None:
+        """Record a pre-earnings report, and what it expected.
+
+        The expectation is kept because the post-call report opens on the gap
+        between what was expected and what landed, and the report prose is
+        emailed and discarded. A handful of structured fields is enough for
+        that comparison and far cheaper than archiving the document.
+        """
+        sent = (when or date.today()).isoformat()
+        entry: str | dict = sent
+        if expectation:
+            entry = {"sent": sent, **{k: v for k, v in expectation.items() if v is not None}}
+        self._doc.setdefault("earnings", {}).setdefault(ticker, {})[period] = entry
+        self._dirty = True
+
+    def expectation(self, ticker: str, period: str) -> dict:
+        """What the pre-earnings report expected, or {} if it was not recorded.
+
+        Entries written before expectations were kept are plain date strings,
+        so a missing prior is normal rather than a fault. The post-call report
+        says so and carries on -- withholding take-aways because the earlier
+        half is missing would punish the reader for our history.
+        """
+        entry = self._doc.setdefault("earnings", {}).get(ticker, {}).get(period)
+        return {k: v for k, v in entry.items() if k != "sent"} if isinstance(entry, dict) else {}
+
+    # --- earnings calls ---------------------------------------------------
+    def has_call(self, ticker: str, period: str) -> bool:
+        return period in self._doc.setdefault("calls", {}).get(ticker, {})
+
+    def record_call(
+        self, ticker: str, period: str, source: str, when: date | None = None
+    ) -> None:
+        """Record a take-aways report, or a period given up on.
+
+        ``source`` is "transcript", "release" or "missed". Recording the misses
+        matters as much as the sends: without it a company whose transcript
+        never appears stays in the due queue forever, and the poll spends its
+        daily budget rediscovering that every three hours.
+        """
+        self._doc.setdefault("calls", {}).setdefault(ticker, {})[period] = {
+            "at": (when or date.today()).isoformat(),
+            "source": source,
+        }
         self._dirty = True
 
     # --- events -----------------------------------------------------------
@@ -88,4 +135,5 @@ class ReportState:
             "baseline": len(self._doc.get("baseline", {})),
             "earnings": sum(len(v) for v in self._doc.get("earnings", {}).values()),
             "events": sum(len(v) for v in self._doc.get("events", {}).values()),
+            "calls": sum(len(v) for v in self._doc.get("calls", {}).values()),
         }

@@ -682,6 +682,169 @@ def render_research_html(report, dossier) -> str:
 </div>"""
 
 
+# --- earnings call take-aways ---------------------------------------------
+
+CALL_DISCLAIMER = (
+    "These take-aways are a synthesis of public information for research "
+    "purposes, not financial advice."
+)
+
+
+def _call_figures(material) -> list[tuple[str, str]]:
+    """The expectation, and the outcome where it can be stated exactly.
+
+    Rendered from data rather than from the model. Consensus comes from what
+    was recorded before the call; the reported figure comes from the surprise
+    feed once it carries this quarter, which is usually a day behind the call.
+    Where it does not yet, the row is simply absent -- an empty cell is better
+    than a number nobody checked.
+    """
+    figures: list[tuple[str, str]] = []
+    expectation = material.expectation or {}
+
+    eps_estimate = expectation.get("eps_estimate")
+    if eps_estimate is not None:
+        figures.append(("Consensus EPS", f"{float(eps_estimate):.2f}"))
+
+    history = material.surprises
+    reported = None
+    if history and history.quarters:
+        reported = next(
+            (q for q in history.quarters if q.period == material.period), None
+        )
+    if reported is not None:
+        figures.append(("Reported EPS", f"{reported.actual:.2f}"))
+        figures.append(("Surprise", reported.summary))
+    elif eps_estimate is not None:
+        figures.append(("Reported EPS", "not yet in the feed"))
+
+    grade = expectation.get("grade")
+    if grade:
+        figures.append(("Grade going in", str(grade)))
+
+    return figures
+
+
+def _call_source_line(material) -> str:
+    if material.transcript:
+        t = material.transcript
+        detail = f"{t.words:,} words"
+        if t.analysts:
+            count = len(t.analysts)
+            detail += f", Q&A from {count} analyst{'' if count == 1 else 's'}"
+        return f"Built on the earnings release and the call transcript ({detail})."
+    return (
+        "Built on the earnings release only — no transcript was available for "
+        "this call, so there are no take-aways from the Q&A."
+    )
+
+
+def render_call_text(result, material) -> str:
+    lines = [
+        material.title.upper(),
+        f"Earnings call take-aways — {material.period}",
+        f"{now_et():%A, %B %d, %Y}",
+        "",
+        _call_source_line(material),
+        "",
+    ]
+
+    figures = _call_figures(material)
+    if figures:
+        width = max(len(label) for label, _ in figures)
+        for label, value in figures:
+            lines.append(f"  {label:<{width}}  {value}")
+        lines.append("")
+
+    from .call_takeaways import SECTIONS
+
+    for _, label in SECTIONS:
+        body = result.sections.get(label)
+        if body:
+            lines += ["=" * 68, label.upper(), "=" * 68, "", body, ""]
+
+    if material.release:
+        lines += [f"Earnings release: {material.release.url}", ""]
+    lines += ["-" * 68, COMMAND_HINT, "", CALL_DISCLAIMER]
+    return "\n".join(lines)
+
+
+def render_call_html(result, material) -> str:
+    from .call_takeaways import SECTIONS
+
+    muted = "#6b7280"
+    figures = _call_figures(material)
+
+    figures_block = ""
+    if figures:
+        cells = "".join(
+            f'<td style="padding:9px 18px 9px 0;vertical-align:top;">'
+            f'<div style="color:{muted};font-size:11px;letter-spacing:.05em;'
+            f'text-transform:uppercase;">{escape(label)}</div>'
+            f'<div style="font-size:15px;font-weight:600;white-space:nowrap;">'
+            f"{escape(value)}</div></td>"
+            for label, value in figures
+        )
+        figures_block = (
+            '<table role="presentation" cellpadding="0" cellspacing="0" '
+            'style="border-collapse:collapse;margin:18px 0 0;">'
+            f"<tr>{cells}</tr></table>"
+        )
+
+    blocks = []
+    for _, label in SECTIONS:
+        body = result.sections.get(label)
+        if not body:
+            continue
+        items = [line.lstrip("- ").strip() for line in body.splitlines()
+                 if line.strip().startswith("-")]
+        if items:
+            inner = (
+                '<ul style="margin:0;padding-left:20px;font-size:13.5px;'
+                'line-height:1.55;">'
+                + "".join(f'<li style="margin:0 0 5px;">{escape(i)}</li>' for i in items)
+                + "</ul>"
+            )
+        else:
+            inner = (
+                f'<p style="margin:0;font-size:13.5px;line-height:1.55;">'
+                f"{escape(body)}</p>"
+            )
+        blocks.append(
+            f'<div style="margin:22px 0 0;">'
+            f'<div style="color:{muted};font-size:11px;letter-spacing:.05em;'
+            f'text-transform:uppercase;margin:0 0 7px;">{escape(label)}</div>'
+            f"{inner}</div>"
+        )
+
+    release_link = ""
+    if material.release:
+        release_link = (
+            f'<p style="margin:20px 0 0;font-size:12px;">'
+            f'<a href="{escape(material.release.url, quote=True)}" '
+            f'style="color:#1a4fa0;">Earnings release (SEC)</a></p>'
+        )
+
+    return f"""\
+<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;
+            max-width:660px;margin:0 auto;padding:28px 24px;color:#111827;">
+  <h1 style="margin:0 0 4px;font-size:21px;font-weight:700;">{escape(material.title)}</h1>
+  <p style="margin:0;color:{muted};font-size:13px;">
+    Earnings call take-aways &middot; {escape(material.period)}
+    &middot; {now_et():%B %d, %Y}
+  </p>
+  <p style="margin:10px 0 0;color:{muted};font-size:12.5px;line-height:1.5;">
+    {escape(_call_source_line(material))}
+  </p>
+  {figures_block}
+  {"".join(blocks)}
+  {release_link}
+  <p style="margin:28px 0 0;padding-top:14px;border-top:1px solid #e5e7eb;
+            color:{muted};font-size:12px;line-height:1.5;">{escape(COMMAND_HINT)}<br><br>
+    {escape(CALL_DISCLAIMER)}</p>
+</div>"""
+
+
 def send_credit_notice(pending: list[str], detail: str) -> None:
     """Tell the reader that research has stopped, and why.
 

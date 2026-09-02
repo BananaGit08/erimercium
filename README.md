@@ -15,6 +15,7 @@ what is happening to them.
 | 3 | Research reports: baseline, pre-earnings, event-triggered | **Done** |
 | 4 | Formatting, source links, filter tuning | Not started |
 | 5 | Watchlist changes by email reply | **Done** |
+| 6 | Earnings call take-aways, paired with the pre-earnings report | **Done** |
 
 ## Setup
 
@@ -474,6 +475,61 @@ next day.
 | `--run` | Generate, email and record everything due |
 | `--ticker X --dossier-only` | Print the gathered data, no model, no key needed |
 | `--ticker X` | One report on demand |
+
+## Earnings call take-aways
+
+After a holding reports, a poll every three hours looks for what it said and
+sends a short set of take-aways — a one-minute read, not a research report.
+
+**Two sources with different jobs.** The reader framed it himself: *"the press
+release is the official statement which they read on the earnings call, but
+then after the CEO/CFO finishes reading the press release, they do a live Q&A
+which then adds important color."*
+
+| Source | Supplies | Availability |
+|---|---|---|
+| SEC 8-K Item 2.02 release | Every reported figure, and guidance | Always, for a US filer |
+| Alpha Vantage transcript | The Q&A, and framing in the prepared remarks | Usually within a day |
+
+So they are not a source and a fallback. The release is the record for numbers —
+it is the company's own words, filed within minutes, with the tables, and
+auto-generated transcripts mangle numerals. The transcript carries the part
+nothing else does. The consequence is that the **comparison against
+expectations always works**, transcript or not; only the Q&A section depends on
+one, and when there is none the report says so rather than dropping a heading
+silently.
+
+**The pair is the product.** A pre-earnings report records what it expected —
+consensus EPS and revenue, its grade, its sentiment read — as a few structured
+fields in `reports_sent.json`. The take-aways read them back and open on the
+gap. The report prose is emailed and discarded; archiving it to get this would
+have been the expensive way to the same place. Entries written before this
+existed are plain date strings, so a missing prior is normal: the report says
+so and compares against consensus alone.
+
+**Finding the Q&A.** Transcript segments carry a speaker and a title, so the
+boundary is the first analyst to speak — not the last executive, since
+management answers throughout the Q&A. A call with no analyst-attributed
+segments has no separable Q&A, and the report says that rather than blurring
+the two halves.
+
+**Budgets and windows.** Alpha Vantage's free tier is roughly 25 requests a day
+at one per second, and signals a breach with HTTP 200 and an advisory string
+rather than a 429 — which reads exactly like a paywall page, and cost one probe
+run before this was understood. Only companies actually due are polled, never
+the watchlist, and a rate-limited answer stops the run rather than spending the
+rest of the day rediscovering it. A company is polled for four days after
+reporting and then recorded as missed: foreign issuers and small caps often
+have no transcript, and without closing the window they would be re-polled
+forever.
+
+### What was ruled out, so nobody re-tries it
+
+| Source | Result |
+|---|---|
+| Finnhub `/stock/transcripts` | HTTP 403 — premium |
+| Financial Modeling Prep | 401; transcripts have moved to paid plans |
+| Motley Fool, Seeking Alpha, Insider Monkey | Not probed. Publicly readable, copyrighted, and their terms forbid automated collection |
 
 ## Disclaimer
 
