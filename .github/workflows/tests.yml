@@ -1,0 +1,40 @@
+name: Tests
+
+# Every pull request in this repository so far has merged with no checks at
+# all: the test suite exists, has caught real defects while being written, and
+# nothing has ever run it except a person remembering to. Five merges went in
+# on that basis in one evening.
+#
+# Deliberately needs no secrets. The suite is offline by design -- fixtures
+# rather than live calls -- so a fork's pull request runs it as completely as a
+# branch does, and a leaked key is not among the things that can go wrong here.
+on:
+  pull_request:
+  push:
+    branches: [Main]
+
+# A second push to a branch makes the first run's answer irrelevant.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Run tests
+        run: python -m pytest -q
