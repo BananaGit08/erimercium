@@ -9,7 +9,9 @@
     "AMD": "2026-09-02",
     "AMZN": "2026-09-02",
     "ARM": "2026-09-03",
-    "ASAN": "2026-09-03"
+    "ASAN": "2026-09-03",
+    "ASML": "2026-09-04",
+    "AVGO": "2026-09-04"
   },
   "calls": {
     "AFRM": {
@@ -126,6 +128,13 @@
         "grade": "C",
         "sent": "2026-09-02",
         "sentiment": "- Sentiment has been drifting more cautious into the print: as of late August the average rating had moved to \"Reduce\" per MarketBeat's tracking, a step down from the \"Hold\" consensus that had prevailed earlier in the year.\n- Cuts have outnumbered raises recently \u2014 Jefferies reit"
+      }
+    },
+    "ORCL": {
+      "2027Q1": {
+        "grade": "B-",
+        "sent": "2026-09-04",
+        "sentiment": "- Consensus rating remains \"Buy\" across a large analyst pool \u2014 roughly 44 analysts rate the stock a Buy with a 12-month price target near $242.69, and other trackers put the average target as high as $261.61, implying a price increase of 101.66% from a $129.73 reference price.\n- "
       }
     },
     "PANW": {
