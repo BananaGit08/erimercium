@@ -9,7 +9,13 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
-from watchlist_agent.call_takeaways import CallMaterial, parse, to_prompt_context
+from watchlist_agent.call_takeaways import (
+    CallMaterial,
+    format_revenue,
+    parse,
+    resolve_consensus,
+    to_prompt_context,
+)
 from watchlist_agent.calls import close_expired, due_for_calls
 from watchlist_agent.earnings import EarningsEvent
 from watchlist_agent.release import EarningsRelease, to_text
@@ -108,9 +114,15 @@ def test_a_legacy_date_only_entry_reads_as_no_expectation(tmp_path):
 
 
 def test_a_missing_prior_does_not_block_the_report():
-    material = CallMaterial(ticker="AAPL", company="Apple", period="2026Q3")
+    """And must not make the report claim no comparison is possible."""
+    material = CallMaterial(
+        ticker="AAPL", company="Apple", period="2026Q3",
+        consensus=resolve_consensus(1.60, 9.4e10, None, None),
+    )
     context = to_prompt_context(material)
-    assert "no pre-earnings expectation was recorded" in context
+    assert "consensus EPS: 1.60" in context
+    assert "no earlier grade or flagged risk" in context
+    assert "do not say a comparison is impossible" in context
 
 
 # --- transcripts -----------------------------------------------------------
@@ -305,3 +317,76 @@ def test_an_unconventionally_named_document_is_still_allowed():
 
 def test_a_non_document_is_not_plausible():
     assert not _plausible("logo.jpg")
+
+
+# --- consensus: the numbers that were fetched and then dropped -------------
+#
+# PANW's report said "no like-for-like comparison is possible" while the
+# consensus sat in two variables in memory: the calendar entry for that
+# quarter, and the surprise feed's estimate behind "beat by 2.4%".
+
+
+def test_the_calendar_estimate_is_preferred():
+    """The bar standing when they reported, not the one from a week earlier."""
+    c = resolve_consensus(1.00, 3.38e9, {"eps_estimate": 0.96}, 0.99)
+    assert c.eps == 1.00
+    assert c.eps_source == "Finnhub earnings calendar"
+    assert c.revenue == 3.38e9
+
+
+def test_the_surprise_feed_is_the_second_source():
+    c = resolve_consensus(None, None, None, 0.99)
+    assert c.eps == 0.99
+    assert c.eps_source == "Finnhub surprise feed"
+
+
+def test_the_recorded_expectation_is_the_last_resort():
+    c = resolve_consensus(None, None, {"eps_estimate": 0.96}, None)
+    assert c.eps == 0.96
+    assert c.eps_source == "recorded before the call"
+
+
+def test_revenue_falls_back_to_what_was_recorded():
+    c = resolve_consensus(1.00, None, {"revenue_estimate": 3.3e9}, None)
+    assert c.revenue == 3.3e9
+    assert c.revenue_source == "recorded before the call"
+
+
+def test_no_source_means_no_consensus_rather_than_a_guess():
+    c = resolve_consensus(None, None, None, None)
+    assert c.eps is None and c.revenue is None
+
+
+def test_estimate_drift_is_surfaced_only_when_visible():
+    """A reader only needs telling when the printed number would differ."""
+    moved = resolve_consensus(1.00, None, {"eps_estimate": 0.96}, None)
+    assert moved.eps_moved
+    held = resolve_consensus(1.00, None, {"eps_estimate": 1.001}, None)
+    assert not held.eps_moved
+
+
+def test_drift_is_explained_in_the_prompt():
+    material = CallMaterial(
+        ticker="PANW", company="Palo Alto Networks", period="2026Q4",
+        consensus=resolve_consensus(1.00, None, {"eps_estimate": 0.96}, None),
+    )
+    context = to_prompt_context(material)
+    assert "used 0.96" in context
+    assert "stood at 1.00" in context
+
+
+def test_the_prompt_names_the_source_of_each_figure():
+    """Panels differ between providers; a stated source is not an error."""
+    material = CallMaterial(
+        ticker="PANW", company="Palo Alto Networks", period="2026Q4",
+        consensus=resolve_consensus(1.00, 3.38e9, None, None),
+    )
+    context = to_prompt_context(material)
+    assert "source: Finnhub earnings calendar" in context
+    assert "name the source" in context
+
+
+def test_revenue_formatting_reads_as_a_person_would_say_it():
+    assert format_revenue(3.41e9) == "$3.41B"
+    assert format_revenue(940e6) == "$940M"
+    assert format_revenue(None) == ""
