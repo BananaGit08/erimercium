@@ -6,12 +6,22 @@ matched pair by design -- the reader asked for both, stacked, because "the
 pre-earnings is all about expectations and predictions by analysts, the actual
 earnings is the reality".
 
+The two sources arrive at different times, and that governs the whole design.
+The 8-K press release is on EDGAR minutes after a company reports; a transcript
+takes hours. So the first poll after a call finds the release alone, and take-
+aways go out from it that day. The period stays open afterwards: if a
+transcript appears inside the window, a second report follows covering what the
+release could not carry -- above all the Q&A, which is the half the reader
+asked for by name. Treating the release as the final word is how every
+take-away in the first live week came to be release-only.
+
 Two things bound the polling. Transcripts appear hours to a day after a call,
 so a company is checked for a few days and then given up on rather than left in
 the queue forever. And Alpha Vantage's free tier is roughly 25 requests a day
 with a one-per-second ceiling, so only companies actually due are polled --
-never the watchlist -- and a rate-limit answer stops the run rather than
-spending the rest of the budget rediscovering it.
+never the watchlist. A spent budget stops the run asking for transcripts, but
+does not stop the run: a report the release can carry needs nothing from that
+source, and used to be lost with it.
 """
 
 from __future__ import annotations
@@ -55,6 +65,9 @@ MAX_PER_RUN = 4
 class Due:
     event: EarningsEvent
     reason: str
+    # Take-aways already went out from the press release and only a transcript
+    # would improve on them. Nothing is sent unless one turns up.
+    upgrade: bool = False
 
     @property
     def ticker(self) -> str:
@@ -71,10 +84,16 @@ def due_for_calls(
     today: date | None = None,
     window: int = WINDOW_DAYS,
 ) -> list[Due]:
-    """Companies that have reported and have no take-aways yet.
+    """Companies that have reported and are owed take-aways or a better set.
 
-    Ordered oldest-first: a company whose window is about to close is the one
-    at risk of never being covered, so it goes first when the run is capped.
+    Two kinds of work. A company with nothing sent yet is owed a report. One
+    whose report was written from the press release is owed the transcript, if
+    a transcript appears before the window closes -- the Q&A is the half the
+    reader asked for by name, and it does not exist yet when the release does.
+
+    Never-covered companies come first: a company with no email at all has
+    more at stake than one whose email could be improved. Within each kind the
+    oldest goes first, being nearest to losing its chance entirely.
     """
     today = today or date.today()
     pending: list[Due] = []
@@ -84,13 +103,17 @@ def due_for_calls(
         age = (today - event.date).days
         if age > window:
             continue
-        if state.has_call(event.ticker, event.period):
+        upgrade = state.awaits_transcript(event.ticker, event.period)
+        if state.has_call(event.ticker, event.period) and not upgrade:
             continue
+        when = f"reported {event.date:%b %d}" + (f", {age}d ago" if age else ", today")
         pending.append(Due(
             event=event,
-            reason=f"reported {event.date:%b %d}" + (f", {age}d ago" if age else ", today"),
+            reason=f"{when}; release take-aways sent, waiting on the transcript"
+                   if upgrade else when,
+            upgrade=upgrade,
         ))
-    pending.sort(key=lambda d: d.event.date)
+    pending.sort(key=lambda d: (d.upgrade, d.event.date))
     return pending
 
 
@@ -116,7 +139,7 @@ def close_expired(
     return closed
 
 
-def gather(due: Due, state: ReportState) -> CallMaterial:
+def gather(due: Due, state: ReportState, want_transcript: bool = True) -> CallMaterial:
     """Everything the report is written from. No model, no sending."""
     event = due.event
     material = CallMaterial(
@@ -124,6 +147,7 @@ def gather(due: Due, state: ReportState) -> CallMaterial:
         company="",
         period=event.period,
         expectation=state.expectation(event.ticker, event.period),
+        follows_release=due.upgrade,
     )
 
     with requests.Session() as finnhub, sec_session() as sec:
@@ -135,7 +159,20 @@ def gather(due: Due, state: ReportState) -> CallMaterial:
             sec, event.ticker, since=event.date - timedelta(days=1)
         )
         material.surprises = fetch_surprises(finnhub, event.ticker)
-        material.transcript = fetch_transcript(finnhub, event.ticker, event.period)
+        # The transcript enriches the report; the release is what it is built
+        # from. A spent transcript budget used to abort the whole run, so a
+        # company whose release was sitting in hand got no email at all -- an
+        # optional source taking down the source of record.
+        if want_transcript:
+            try:
+                material.transcript = fetch_transcript(
+                    finnhub, event.ticker, event.period
+                )
+            except RateLimited as exc:
+                log.warning("%s transcript source rate-limited: %s", event.ticker, exc)
+                material.transcript_unavailable = True
+        else:
+            material.transcript_unavailable = True
 
     # The calendar entry for this quarter carries the consensus estimates, and
     # the surprise feed carries them again once it catches up. Both were being
@@ -164,10 +201,13 @@ def gather(due: Due, state: ReportState) -> CallMaterial:
 
 def _send(material: CallMaterial, state: ReportState, dry_run: bool) -> bool:
     result = synthesize(material)
-    subject = (
-        f"Earnings call: {material.title} — {material.period}"
-        + ("" if material.transcript else " (from the release)")
-    )
+    if material.follows_release:
+        tail = " (from the call transcript)"
+    elif material.transcript:
+        tail = ""
+    else:
+        tail = " (from the release)"
+    subject = f"Earnings call: {material.title} — {material.period}{tail}"
 
     if dry_run:
         log.info("[dry run] would send %r", subject)
@@ -212,21 +252,33 @@ def run_due(dry_run: bool = False, max_reports: int = MAX_PER_RUN) -> int:
         )
         pending = pending[:max_reports]
 
-    log.info("%d call(s) this run: %s", len(pending),
-             ", ".join(f"{d.ticker} {d.period}" for d in pending))
+    log.info(
+        "%d call(s) this run: %s", len(pending),
+        ", ".join(
+            f"{d.ticker} {d.period}" + (" (transcript upgrade)" if d.upgrade else "")
+            for d in pending
+        ),
+    )
 
     sent = 0
+    # Once the transcript budget is spent every further request returns the
+    # same answer, so stop asking -- but keep going, because a release-based
+    # report needs nothing from that source.
+    transcript_budget = True
     for due in pending:
         log.info("--- %s %s: %s", due.ticker, due.period, due.reason)
-        try:
-            material = gather(due, state)
-        except RateLimited as exc:
-            # The transcript budget is spent. Stop rather than burn the rest of
-            # the day proving it; the remaining companies are still in window.
-            log.warning("transcript source rate-limited, stopping this run: %s", exc)
-            break
+        material = gather(due, state, want_transcript=transcript_budget)
+        if material.transcript_unavailable and transcript_budget:
+            transcript_budget = False
 
-        if not material.release and not material.transcript:
+        if due.upgrade:
+            # Release take-aways are already with the reader. Only a transcript
+            # justifies a second email; without one there is nothing to add.
+            if not material.transcript:
+                log.info("%s %s: still no transcript, nothing to add",
+                         due.ticker, due.period)
+                continue
+        elif not material.release and not material.transcript:
             log.info("%s %s: nothing published yet, will look again", due.ticker, due.period)
             continue
 
@@ -240,6 +292,11 @@ def run_due(dry_run: bool = False, max_reports: int = MAX_PER_RUN) -> int:
 
     if close_expired(calendar, state):
         state.save()
+    if not transcript_budget:
+        log.warning(
+            "the transcript budget ran out during this run; any release-based "
+            "take-aways still went out and upgrades stay due"
+        )
     log.info("sent %d take-aways; state now %s", sent, state.counts())
     return 0
 

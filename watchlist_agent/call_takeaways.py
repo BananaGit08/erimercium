@@ -218,6 +218,14 @@ class CallMaterial:
     # the calendar and the report, so every take-away said no comparison was
     # possible while the numbers sat unused in memory.
     consensus: Consensus = field(default_factory=Consensus)
+    # Take-aways from the release already went out for this quarter and this
+    # report is the transcript following it, so it is written and introduced
+    # as a second look rather than a repeat.
+    follows_release: bool = False
+    # The transcript was not asked for or the daily budget was spent, as
+    # against asked for and not published. Only the first is worth retrying
+    # inside the same run.
+    transcript_unavailable: bool = False
 
     @property
     def title(self) -> str:
@@ -257,6 +265,20 @@ def to_prompt_context(material: CallMaterial) -> str:
         f"COMPANY: {material.title}",
         f"REPORTING PERIOD: {material.period}",
     ]
+
+    if material.follows_release:
+        lines += [
+            "",
+            "THIS IS THE SECOND REPORT ON THIS QUARTER. Take-aways drawn from "
+            "the press release already reached the reader on the day the "
+            "company reported; they have the headline figures and the "
+            "comparison against consensus. This one exists because the "
+            "transcript has since been published, so weight it towards what "
+            "the release could not carry: the Q&A, management's answers under "
+            "pressure, and anything said on the call that changes how the "
+            "reported numbers should be read. Restate a figure only where the "
+            "call gives it new meaning.",
+        ]
 
     consensus = material.consensus
     expectation = material.expectation

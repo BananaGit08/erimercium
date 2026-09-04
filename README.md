@@ -530,15 +530,43 @@ management answers throughout the Q&A. A call with no analyst-attributed
 segments has no separable Q&A, and the report says that rather than blurring
 the two halves.
 
+**Two reports, because the two sources arrive hours apart.** The 8-K release is
+on EDGAR minutes after a company reports; the transcript takes hours. So the
+first poll after a call always finds the release alone, and the take-aways
+written from it go out that day. The period then stays open: if a transcript
+appears before the window closes, a second report follows, marked as a
+follow-up and weighted towards what the release could not carry — above all the
+Q&A. Only a transcript justifies that second email; without one nothing is
+sent, so a quarter never produces two versions of the same content.
+
+This is worth stating plainly because the first live week got it wrong. The
+send recorded the period as finished regardless of what it had been written
+from, so the release-based report closed the door on day one and the four-day
+window never opened. Nine take-aways went out over two days and every one of
+them was release-only — no Q&A, in a feature whose reason for existing was the
+Q&A. The bug was ours, not the data source's: rate limits and quarter-label
+mismatch were both suspected first and both ruled out with probes.
+
 **Budgets and windows.** Alpha Vantage's free tier is roughly 25 requests a day
 at one per second, and signals a breach with HTTP 200 and an advisory string
 rather than a 429 — which reads exactly like a paywall page, and cost one probe
 run before this was understood. Only companies actually due are polled, never
-the watchlist, and a rate-limited answer stops the run rather than spending the
-rest of the day rediscovering it. A company is polled for four days after
+the watchlist. A spent budget stops the run asking for transcripts but does not
+stop the run: a report the release can carry needs nothing from that source,
+and used to be lost along with it. A company is polled for four days after
 reporting and then recorded as missed: foreign issuers and small caps often
 have no transcript, and without closing the window they would be re-polled
 forever.
+
+**Open question: how current the transcript feed is.** Alpha Vantage returns
+full transcripts for older quarters — DocuSign's fiscal 2026 Q1 through Q3 all
+come back at 6,000–11,000 words, correctly labelled by the company's own fiscal
+quarter, the same label Finnhub uses. What is not yet established is how soon
+after a call one appears. A day after four companies reported, all four were
+still empty, and the probe hit the daily cap before the two intervening
+quarters could be checked. Until that is settled, treat "as soon as the
+transcript is available" as unproven: the queue now waits correctly, but
+whether anything arrives to fill it is a property of the source.
 
 ### What was ruled out, so nobody re-tries it
 

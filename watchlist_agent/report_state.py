@@ -91,6 +91,29 @@ class ReportState:
     def has_call(self, ticker: str, period: str) -> bool:
         return period in self._doc.setdefault("calls", {}).get(ticker, {})
 
+    def call_source(self, ticker: str, period: str) -> str:
+        """What the recorded take-aways were written from, or "" if none.
+
+        Entries predating the source being recorded read as "", which routes
+        them to the same place a missing record does: covered, nothing owed.
+        """
+        entry = self._doc.setdefault("calls", {}).get(ticker, {}).get(period)
+        return entry.get("source", "") if isinstance(entry, dict) else ""
+
+    def awaits_transcript(self, ticker: str, period: str) -> bool:
+        """Whether a transcript would still add something to what was sent.
+
+        A press release is published within minutes of a company reporting and
+        a transcript takes hours, so the first poll after a call always finds
+        the release alone. Sending from it and calling the period finished is
+        how every take-away came to be release-only: the four-day window meant
+        to wait for the transcript never opened, because the door shut on day
+        one. A release-sourced record is therefore a partial answer, not a
+        closed one -- the queue keeps it until a transcript arrives or the
+        window closes on it.
+        """
+        return self.call_source(ticker, period) == "release"
+
     def record_call(
         self, ticker: str, period: str, source: str, when: date | None = None
     ) -> None:
