@@ -23,7 +23,12 @@ from datetime import date, timedelta
 
 import requests
 
-from .call_takeaways import CallMaterial, available, synthesize
+from .call_takeaways import (
+    CallMaterial,
+    available,
+    resolve_consensus,
+    synthesize,
+)
 from .earnings import EarningsEvent, fetch_recent, for_watchlist
 from .email_report import render_call_html, render_call_text, send_email
 from .filings import company_name, sec_session
@@ -131,6 +136,28 @@ def gather(due: Due, state: ReportState) -> CallMaterial:
         )
         material.surprises = fetch_surprises(finnhub, event.ticker)
         material.transcript = fetch_transcript(finnhub, event.ticker, event.period)
+
+    # The calendar entry for this quarter carries the consensus estimates, and
+    # the surprise feed carries them again once it catches up. Both were being
+    # fetched and neither reached the report, so every take-away said no
+    # comparison was possible while the numbers sat in memory.
+    reported = next(
+        (q for q in (material.surprises.quarters if material.surprises else [])
+         if q.period == event.period),
+        None,
+    )
+    material.consensus = resolve_consensus(
+        event_eps=event.eps_estimate,
+        event_revenue=event.revenue_estimate,
+        expectation=material.expectation,
+        reported_estimate=reported.estimate if reported else None,
+    )
+    log.info(
+        "%s %s consensus: EPS %s, revenue %s",
+        event.ticker, event.period,
+        material.consensus.eps if material.consensus.eps is not None else "n/a",
+        material.consensus.revenue if material.consensus.revenue is not None else "n/a",
+    )
 
     return material
 

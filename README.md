@@ -499,6 +499,23 @@ expectations always works**, transcript or not; only the Q&A section depends on
 one, and when there is none the report says so rather than dropping a heading
 silently.
 
+**Consensus comes from whichever source carries it.** The calendar entry for
+the quarter is preferred — that is the bar standing when the company reported,
+which is what the market judged them against — then the surprise feed, then
+whatever the pre-earnings report recorded. Where the earlier prediction differs
+from the final consensus by enough to print differently, the report says so and
+judges the result against the later figure.
+
+Both were being fetched and neither reached the report for a while, so every
+take-away said no comparison was possible while the numbers sat unused in
+memory. The reader noticed: he could Google the beat and the email could not
+state it.
+
+Note that analyst panels differ between providers, so a surprise quoted here
+may not match Google to the decimal. The report names its source rather than
+implying a single official number. Reported revenue has no free structured
+feed, so the consensus is shown and the actual is read from the release.
+
 **The pair is the product.** A pre-earnings report records what it expected —
 consensus EPS and revenue, its grade, its sentiment read — as a few structured
 fields in `reports_sent.json`. The take-aways read them back and open on the

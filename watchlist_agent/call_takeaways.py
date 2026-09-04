@@ -115,6 +115,93 @@ class Takeaways:
         return self.sections.get("Headline", "")
 
 
+def format_revenue(value: float | None) -> str:
+    """A revenue figure as a reader would say it."""
+    if value is None:
+        return ""
+    if abs(value) >= 1e9:
+        return f"${value / 1e9:,.2f}B"
+    if abs(value) >= 1e6:
+        return f"${value / 1e6:,.0f}M"
+    return f"${value:,.0f}"
+
+
+@dataclass(frozen=True)
+class Consensus:
+    """What analysts expected, and where each figure came from.
+
+    Provenance is carried rather than dropped because these numbers differ
+    between providers -- Finnhub's analyst panel is not Refinitiv's or Zacks'
+    -- so a reader checking the email against Google will sometimes see 2.4%
+    where we say 2.2%. Naming the source turns that from an apparent error into
+    a stated fact.
+    """
+
+    eps: float | None = None
+    eps_source: str = ""
+    revenue: float | None = None
+    revenue_source: str = ""
+    # What the pre-earnings report expected, kept when it differs from the
+    # consensus standing at the bell. Estimates drift in the days before a
+    # report; "did they beat" is judged against the later number, but a reader
+    # told something different a week ago deserves to see both.
+    predicted_eps: float | None = None
+
+    @property
+    def eps_moved(self) -> bool:
+        if self.eps is None or self.predicted_eps is None:
+            return False
+        # Only when a reader would actually see a different number.
+        return f"{self.eps:.2f}" != f"{self.predicted_eps:.2f}"
+
+
+def resolve_consensus(
+    event_eps: float | None,
+    event_revenue: float | None,
+    expectation: dict | None,
+    reported_estimate: float | None,
+) -> Consensus:
+    """Pick the consensus figures and record where each came from.
+
+    The order is a judgement about what "expected" means. The estimate standing
+    when the company reported wins, because that is the bar the market judged
+    them against -- not the estimate of a week earlier, which is merely what the
+    pre-earnings report happened to see. The earlier figure is kept alongside
+    when it differs.
+
+    Sources in order: the earnings calendar read after the report, the surprise
+    feed once it carries this quarter, then the recorded pre-earnings
+    expectation as a last resort.
+    """
+    expectation = expectation or {}
+    predicted = expectation.get("eps_estimate")
+
+    eps, eps_source = None, ""
+    if event_eps is not None:
+        eps, eps_source = float(event_eps), "Finnhub earnings calendar"
+    elif reported_estimate is not None:
+        eps, eps_source = float(reported_estimate), "Finnhub surprise feed"
+    elif predicted is not None:
+        eps, eps_source = float(predicted), "recorded before the call"
+
+    revenue, revenue_source = None, ""
+    if event_revenue is not None:
+        revenue, revenue_source = float(event_revenue), "Finnhub earnings calendar"
+    elif expectation.get("revenue_estimate") is not None:
+        revenue, revenue_source = (
+            float(expectation["revenue_estimate"]),
+            "recorded before the call",
+        )
+
+    return Consensus(
+        eps=eps,
+        eps_source=eps_source,
+        revenue=revenue,
+        revenue_source=revenue_source,
+        predicted_eps=float(predicted) if predicted is not None else None,
+    )
+
+
 @dataclass
 class CallMaterial:
     """Everything a take-aways report is written from."""
@@ -126,6 +213,11 @@ class CallMaterial:
     transcript: Transcript | None = None
     expectation: dict = field(default_factory=dict)
     surprises: SurpriseHistory | None = None
+    # Consensus for this quarter, resolved from whichever source carries it.
+    # These figures were always being fetched and were simply dropped between
+    # the calendar and the report, so every take-away said no comparison was
+    # possible while the numbers sat unused in memory.
+    consensus: Consensus = field(default_factory=Consensus)
 
     @property
     def title(self) -> str:
@@ -166,26 +258,57 @@ def to_prompt_context(material: CallMaterial) -> str:
         f"REPORTING PERIOD: {material.period}",
     ]
 
+    consensus = material.consensus
     expectation = material.expectation
-    lines += ["", "WHAT WAS EXPECTED BEFORE THE CALL:"]
+
+    lines += ["", "CONSENSUS FOR THIS QUARTER:"]
+    if consensus.eps is not None:
+        lines.append(
+            f"  consensus EPS: {consensus.eps:.2f}  (source: {consensus.eps_source})"
+        )
+    if consensus.revenue is not None:
+        lines.append(
+            f"  consensus revenue: {format_revenue(consensus.revenue)}  "
+            f"(source: {consensus.revenue_source})"
+        )
+    if consensus.eps is None and consensus.revenue is None:
+        lines.append("  no consensus estimate available from any source")
+    else:
+        lines.append(
+            "  Compare the figures reported in the release against these, and "
+            "state the surprise for EPS and for revenue. Analyst panels differ "
+            "between providers, so name the source rather than implying a "
+            "single official number."
+        )
+    if consensus.eps_moved:
+        lines.append(
+            f"  note: the pre-earnings report a week earlier used "
+            f"{consensus.predicted_eps:.2f}; consensus stood at "
+            f"{consensus.eps:.2f} when they reported. Judge the result against "
+            f"the later figure and mention the drift."
+        )
+
     if expectation:
-        for label, key in (
-            ("consensus EPS estimate", "eps_estimate"),
-            ("consensus revenue estimate", "revenue_estimate"),
-            ("pre-earnings report grade", "grade"),
-            ("analyst sentiment then", "sentiment"),
-        ):
+        lines += ["", "WHAT THE PRE-EARNINGS REPORT EXPECTED:"]
+        for label, key in (("its grade", "grade"), ("analyst sentiment then", "sentiment")):
             if expectation.get(key) is not None:
                 lines.append(f"  {label}: {expectation[key]}")
     else:
         lines.append(
-            "  no pre-earnings expectation was recorded for this period — say so "
-            "and compare against consensus in the release alone"
+            "  (no pre-earnings report was recorded for this period, so there is "
+            "no earlier grade or flagged risk to check — the consensus "
+            "comparison above still stands, so do not say a comparison is "
+            "impossible)"
         )
 
     if material.surprises and material.surprises.quarters:
-        lines += ["", "RECORD AGAINST CONSENSUS BEFORE THIS QUARTER:",
+        lines += ["", "RECORD AGAINST CONSENSUS (may already include this quarter):",
                   f"  {material.surprises.characterise()}"]
+        for q in material.surprises.quarters:
+            lines.append(
+                f"  {q.period}: estimate {q.estimate:.2f}, actual {q.actual:.2f} "
+                f"— {q.summary}"
+            )
 
     if material.release:
         lines += [

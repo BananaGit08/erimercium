@@ -693,18 +693,20 @@ CALL_DISCLAIMER = (
 def _call_figures(material) -> list[tuple[str, str]]:
     """The expectation, and the outcome where it can be stated exactly.
 
-    Rendered from data rather than from the model. Consensus comes from what
-    was recorded before the call; the reported figure comes from the surprise
-    feed once it carries this quarter, which is usually a day behind the call.
-    Where it does not yet, the row is simply absent -- an empty cell is better
-    than a number nobody checked.
+    Rendered from data rather than from the model, so these figures cannot
+    drift. Consensus is resolved from whichever source carries it -- the
+    calendar first, then the surprise feed, then what was recorded before the
+    call. The reported EPS comes from the surprise feed once it carries this
+    quarter, which is usually a day behind; until then the row says so rather
+    than showing a number nobody checked.
     """
-    figures: list[tuple[str, str]] = []
-    expectation = material.expectation or {}
+    from .call_takeaways import format_revenue
 
-    eps_estimate = expectation.get("eps_estimate")
-    if eps_estimate is not None:
-        figures.append(("Consensus EPS", f"{float(eps_estimate):.2f}"))
+    figures: list[tuple[str, str]] = []
+    consensus = getattr(material, "consensus", None)
+
+    if consensus is not None and consensus.eps is not None:
+        figures.append(("Consensus EPS", f"{consensus.eps:.2f}"))
 
     history = material.surprises
     reported = None
@@ -715,10 +717,16 @@ def _call_figures(material) -> list[tuple[str, str]]:
     if reported is not None:
         figures.append(("Reported EPS", f"{reported.actual:.2f}"))
         figures.append(("Surprise", reported.summary))
-    elif eps_estimate is not None:
+    elif consensus is not None and consensus.eps is not None:
         figures.append(("Reported EPS", "not yet in the feed"))
 
-    grade = expectation.get("grade")
+    if consensus is not None and consensus.revenue is not None:
+        # No structured feed carries reported revenue on the free tier, so the
+        # actual is stated by the report from the release. Showing the bar it
+        # had to clear is still worth the row.
+        figures.append(("Consensus revenue", format_revenue(consensus.revenue)))
+
+    grade = (material.expectation or {}).get("grade")
     if grade:
         figures.append(("Grade going in", str(grade)))
 
