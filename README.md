@@ -558,15 +558,26 @@ reporting and then recorded as missed: foreign issuers and small caps often
 have no transcript, and without closing the window they would be re-polled
 forever.
 
-**Open question: how current the transcript feed is.** Alpha Vantage returns
-full transcripts for older quarters — DocuSign's fiscal 2026 Q1 through Q3 all
-come back at 6,000–11,000 words, correctly labelled by the company's own fiscal
-quarter, the same label Finnhub uses. What is not yet established is how soon
-after a call one appears. A day after four companies reported, all four were
-still empty, and the probe hit the daily cap before the two intervening
-quarters could be checked. Until that is settled, treat "as soon as the
-transcript is available" as unproven: the queue now waits correctly, but
-whether anything arrives to fill it is a property of the source.
+**How long a transcript actually takes: days, not hours.** This was measured
+rather than assumed, because the guess was wrong and the guess set the window.
+
+Palo Alto Networks reported on Tuesday 1 September. The agent sent take-aways
+from the release the next day, and found no transcript. Four days later Alpha
+Vantage had the full call — 8,386 words, under the fiscal label `2026Q4`, the
+same label already recorded in `reports_sent.json`. So the transcript arrives;
+it simply does not arrive within a day.
+
+That is why the window is a week. `calls.yml` polls on weekdays only, so a
+four-day window opened by a Tuesday-to-Friday report closes over the weekend
+without a single poll in the interval where the transcript appears. PANW is
+exactly that case, and would have been given up on while its transcript sat
+published.
+
+Coverage is not uniform — DocuSign's June 2026 call is missing while its March
+2026 call is present — so a period can still close with nothing, which is what
+the `missed` record is for. But the feature is not blocked on the source: a
+recent call was published within the window, and the queue now stays open long
+enough to collect it.
 
 ### What was ruled out, so nobody re-tries it
 

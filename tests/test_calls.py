@@ -109,6 +109,29 @@ def test_a_legacy_call_entry_without_a_source_is_left_alone(tmp_path):
     assert due_for_calls({"AAPL": event()}, s, TODAY) == []
 
 
+def test_the_window_survives_a_weekend_of_no_polling(tmp_path):
+    """The reason the window is a week rather than four days.
+
+    calls.yml polls on weekdays only. PANW reported Tuesday Sep 1 and its
+    transcript was published within the next four days -- but under a four-day
+    window the period closed on Saturday, with no poll between Friday and
+    Monday to notice. Measured, not assumed: Alpha Vantage returned the full
+    PANW 2026Q4 call while the queue had already given up on it.
+    """
+    from datetime import date as _date
+
+    s = state(tmp_path)
+    s.record_call("PANW", "2026Q4", "release")
+    reported = _date(2026, 9, 1)
+    panw = EarningsEvent(
+        ticker="PANW", date=reported, year=2026, quarter=4,
+        eps_estimate=1.0, revenue_estimate=1e9, hour="amc",
+    )
+    monday = _date(2026, 9, 7)  # the next poll after the Friday one
+    due = due_for_calls({"PANW": panw}, s, monday)
+    assert [(d.ticker, d.upgrade) for d in due] == [("PANW", True)]
+
+
 def test_past_the_window_is_not_due(tmp_path):
     assert due_for_calls({"AAPL": event(days_ago=9)}, state(tmp_path), TODAY) == []
 

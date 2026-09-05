@@ -15,9 +15,11 @@ release could not carry -- above all the Q&A, which is the half the reader
 asked for by name. Treating the release as the final word is how every
 take-away in the first live week came to be release-only.
 
-Two things bound the polling. Transcripts appear hours to a day after a call,
-so a company is checked for a few days and then given up on rather than left in
-the queue forever. And Alpha Vantage's free tier is roughly 25 requests a day
+Two things bound the polling. A transcript takes days rather than hours -- Palo
+Alto Networks reported on a Tuesday and its call was published somewhere in the
+following four days -- so a company is checked for a week and then given up on
+rather than left in the queue forever. And Alpha Vantage's free tier is roughly
+25 requests a day
 with a one-per-second ceiling, so only companies actually due are polled --
 never the watchlist. A spent budget stops the run asking for transcripts, but
 does not stop the run: a report the release can carry needs nothing from that
@@ -51,10 +53,21 @@ from .watchlist import Watchlist
 
 log = logging.getLogger(__name__)
 
-# How long to keep looking for a transcript after the call. Most appear within
-# a day; past four days one is not coming, and a company left in the queue
-# spends the daily request budget every three hours proving it.
-WINDOW_DAYS = 4
+# How long to keep looking for a transcript after the call.
+#
+# Four days was a guess, and measurement contradicted it. Alpha Vantage had
+# nothing for Palo Alto Networks the day after it reported (Sep 1), and had the
+# full call four days later -- so a transcript does arrive, but not within a
+# day. Because this workflow polls on weekdays only, a four-day window opened
+# on a Tuesday-to-Friday report closes over the weekend without a single poll
+# in the interval where the transcript actually appears. PANW is exactly that
+# case: its transcript was published, and the queue would have given up on it
+# before looking again.
+#
+# Seven days clears a weekend with margin. The cost is bounded: only companies
+# already covered from the release stay in the queue, each costs one request
+# per poll, and a spent budget now degrades rather than dropping reports.
+WINDOW_DAYS = 7
 
 # Earnings cluster hard -- eight holdings reported inside one week in the first
 # live batch -- and each report is a model call over a long transcript.
