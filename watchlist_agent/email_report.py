@@ -740,6 +740,15 @@ def _call_source_line(material) -> str:
         if t.analysts:
             count = len(t.analysts)
             detail += f", Q&A from {count} analyst{'' if count == 1 else 's'}"
+        if material.follows_release:
+            # A second email on one quarter reads as a duplicate unless it says
+            # why it exists, so it says so in the first line.
+            return (
+                f"Follows the take-aways sent from the earnings release when "
+                f"{material.ticker} reported. The call transcript has since "
+                f"been published ({detail}), and this covers what it added — "
+                f"above all the Q&A."
+            )
         return f"Built on the earnings release and the call transcript ({detail})."
     return (
         "Built on the earnings release only — no transcript was available for "
@@ -750,7 +759,8 @@ def _call_source_line(material) -> str:
 def render_call_text(result, material) -> str:
     lines = [
         material.title.upper(),
-        f"Earnings call take-aways — {material.period}",
+        f"Earnings call take-aways — {material.period}"
+        + (" (follow-up)" if material.follows_release else ""),
         f"{now_et():%A, %B %d, %Y}",
         "",
         _call_source_line(material),
@@ -838,7 +848,8 @@ def render_call_html(result, material) -> str:
             max-width:660px;margin:0 auto;padding:28px 24px;color:#111827;">
   <h1 style="margin:0 0 4px;font-size:21px;font-weight:700;">{escape(material.title)}</h1>
   <p style="margin:0;color:{muted};font-size:13px;">
-    Earnings call take-aways &middot; {escape(material.period)}
+    Earnings call take-aways{" (follow-up)" if material.follows_release else ""}
+    &middot; {escape(material.period)}
     &middot; {now_et():%B %d, %Y}
   </p>
   <p style="margin:10px 0 0;color:{muted};font-size:12.5px;line-height:1.5;">

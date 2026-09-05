@@ -16,7 +16,7 @@ from watchlist_agent.call_takeaways import (
     resolve_consensus,
     to_prompt_context,
 )
-from watchlist_agent.calls import close_expired, due_for_calls
+from watchlist_agent.calls import Due, close_expired, due_for_calls
 from watchlist_agent.earnings import EarningsEvent
 from watchlist_agent.release import EarningsRelease, to_text
 from watchlist_agent.report_state import ReportState
@@ -58,9 +58,78 @@ def test_already_covered_is_not_due(tmp_path):
 def test_a_rescheduled_date_still_yields_one_report(tmp_path):
     """Keyed by fiscal period, so moving the date cannot cause a repeat."""
     s = state(tmp_path)
-    s.record_call("AAPL", "2026Q3", "release")
+    s.record_call("AAPL", "2026Q3", "transcript")
     moved = event(days_ago=3, quarter=3)
     assert due_for_calls({"AAPL": moved}, s, TODAY) == []
+
+
+def test_release_take_aways_leave_the_period_open_for_the_transcript(tmp_path):
+    """The defect that made every take-away release-only.
+
+    A press release is on EDGAR minutes after a company reports and the
+    transcript takes hours, so the first poll always finds the release alone.
+    Recording that as finished shut the four-day window before it opened.
+    """
+    s = state(tmp_path)
+    s.record_call("AAPL", "2026Q3", "release")
+    due = due_for_calls({"AAPL": event()}, s, TODAY)
+    assert [(d.ticker, d.upgrade) for d in due] == [("AAPL", True)]
+
+
+def test_transcript_take_aways_close_the_period(tmp_path):
+    s = state(tmp_path)
+    s.record_call("AAPL", "2026Q3", "transcript")
+    assert due_for_calls({"AAPL": event()}, s, TODAY) == []
+
+
+def test_a_release_covered_period_stops_being_chased_past_the_window(tmp_path):
+    """Otherwise the upgrade candidate is polled forever."""
+    s = state(tmp_path)
+    s.record_call("AAPL", "2026Q3", "release")
+    assert due_for_calls({"AAPL": event(days_ago=9)}, s, TODAY) == []
+
+
+def test_a_company_owed_nothing_yet_outranks_one_owed_only_an_upgrade(tmp_path):
+    """A reader with no email at all has more at stake than a better email."""
+    s = state(tmp_path)
+    s.record_call("ADBE", "2026Q3", "release")
+    calendar = {
+        "AAPL": event("AAPL", days_ago=1),
+        "ADBE": event("ADBE", days_ago=3),
+    }
+    due = due_for_calls(calendar, s, TODAY)
+    assert [(d.ticker, d.upgrade) for d in due] == [("AAPL", False), ("ADBE", True)]
+
+
+def test_a_legacy_call_entry_without_a_source_is_left_alone(tmp_path):
+    """Entries predating the source field must not all reopen at once."""
+    s = state(tmp_path)
+    s._doc.setdefault("calls", {})["AAPL"] = {"2026Q3": "2026-08-31"}
+    assert s.awaits_transcript("AAPL", "2026Q3") is False
+    assert due_for_calls({"AAPL": event()}, s, TODAY) == []
+
+
+def test_the_window_survives_a_weekend_of_no_polling(tmp_path):
+    """The reason the window is a week rather than four days.
+
+    calls.yml polls on weekdays only. PANW reported Tuesday Sep 1 and its
+    transcript was published within the next four days -- but under a four-day
+    window the period closed on Saturday, with no poll between Friday and
+    Monday to notice. Measured, not assumed: Alpha Vantage returned the full
+    PANW 2026Q4 call while the queue had already given up on it.
+    """
+    from datetime import date as _date
+
+    s = state(tmp_path)
+    s.record_call("PANW", "2026Q4", "release")
+    reported = _date(2026, 9, 1)
+    panw = EarningsEvent(
+        ticker="PANW", date=reported, year=2026, quarter=4,
+        eps_estimate=1.0, revenue_estimate=1e9, hour="amc",
+    )
+    monday = _date(2026, 9, 7)  # the next poll after the Friday one
+    due = due_for_calls({"PANW": panw}, s, monday)
+    assert [(d.ticker, d.upgrade) for d in due] == [("PANW", True)]
 
 
 def test_past_the_window_is_not_due(tmp_path):
@@ -390,3 +459,107 @@ def test_revenue_formatting_reads_as_a_person_would_say_it():
     assert format_revenue(3.41e9) == "$3.41B"
     assert format_revenue(940e6) == "$940M"
     assert format_revenue(None) == ""
+
+
+# --- the transcript is an enrichment, not a precondition -------------------
+
+
+def _patch_sources(monkeypatch, *, transcript=None, release=object(), raises=None):
+    """Stand in for every network fetch gather() makes."""
+    from watchlist_agent import calls as mod
+
+    monkeypatch.setattr(mod, "company_name", lambda s, t: "Apple Inc.")
+    monkeypatch.setattr(mod, "fetch_release", lambda *a, **k: release)
+    monkeypatch.setattr(mod, "fetch_surprises", lambda *a, **k: None)
+
+    def _transcript(*a, **k):
+        if raises is not None:
+            raise raises
+        return transcript
+
+    monkeypatch.setattr(mod, "fetch_transcript", _transcript)
+
+
+def test_a_spent_transcript_budget_does_not_take_down_the_release_report(
+    tmp_path, monkeypatch
+):
+    """An optional source used to abort the run that the release could serve.
+
+    RateLimited propagated out of gather() and broke the loop, so a company
+    whose 8-K was already in hand got no email at all.
+    """
+    from watchlist_agent import calls as mod
+
+    sentinel = object()
+    _patch_sources(monkeypatch, release=sentinel, raises=mod.RateLimited("budget"))
+
+    material = mod.gather(Due(event=event(), reason=""), state(tmp_path))
+
+    assert material.release is sentinel
+    assert material.transcript is None
+    assert material.transcript_unavailable is True
+
+
+def test_the_transcript_is_not_requested_once_the_budget_is_known_spent(
+    tmp_path, monkeypatch
+):
+    from watchlist_agent import calls as mod
+
+    def _boom(*a, **k):
+        raise AssertionError("asked for a transcript with no budget left")
+
+    _patch_sources(monkeypatch)
+    monkeypatch.setattr(mod, "fetch_transcript", _boom)
+
+    material = mod.gather(
+        Due(event=event(), reason=""), state(tmp_path), want_transcript=False
+    )
+    assert material.transcript_unavailable is True
+
+
+def test_an_upgrade_carries_the_follow_up_marking(tmp_path, monkeypatch):
+    from watchlist_agent import calls as mod
+
+    _patch_sources(monkeypatch)
+    material = mod.gather(
+        Due(event=event(), reason="", upgrade=True), state(tmp_path)
+    )
+    assert material.follows_release is True
+
+
+# --- a second email on one quarter must not read as a duplicate ------------
+
+
+def _material(**kw):
+    base = dict(ticker="AAPL", company="Apple Inc.", period="2026Q3")
+    return CallMaterial(**{**base, **kw})
+
+
+def test_the_follow_up_says_why_it_exists(tmp_path):
+    from watchlist_agent.email_report import _call_source_line
+
+    transcript = Transcript(
+        ticker="AAPL", period="2026Q3",
+        segments=[Segment("Jane Doe", "Analyst, Big Bank", "On margins — " * 200)],
+    )
+    line = _call_source_line(_material(transcript=transcript, follows_release=True))
+    assert "Follows the take-aways sent from the earnings release" in line
+    assert "Q&A" in line
+
+
+def test_a_first_report_is_not_described_as_a_follow_up(tmp_path):
+    from watchlist_agent.email_report import _call_source_line
+
+    line = _call_source_line(_material())
+    assert "Follows" not in line
+    assert "no transcript was available" in line
+
+
+def test_the_writer_is_told_to_lead_with_what_the_release_could_not_carry():
+    context = to_prompt_context(_material(follows_release=True))
+    assert "SECOND REPORT ON THIS QUARTER" in context
+    assert "Q&A" in context
+
+
+def test_a_first_report_gets_no_second_report_framing():
+    assert "SECOND REPORT ON THIS QUARTER" not in to_prompt_context(_material())
