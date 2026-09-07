@@ -28,8 +28,8 @@
     },
     "AVGO": {
       "2026Q3": {
-        "at": "2026-09-02",
-        "source": "release"
+        "at": "2026-09-07",
+        "source": "transcript"
       }
     },
     "DELL": {
@@ -46,8 +46,8 @@
     },
     "HPE": {
       "2026Q3": {
-        "at": "2026-09-02",
-        "source": "release"
+        "at": "2026-09-07",
+        "source": "transcript"
       }
     },
     "IREN": {
@@ -70,8 +70,8 @@
     },
     "PANW": {
       "2026Q4": {
-        "at": "2026-09-02",
-        "source": "release"
+        "at": "2026-09-07",
+        "source": "transcript"
       }
     },
     "PATH": {
