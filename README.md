@@ -370,6 +370,33 @@ pass some noise and miss some unusually worded stories. Bullets are the
 headline itself with a source link, not a synthesised takeaway; writing "the
 major takeaway" needs a model reading the article.
 
+**Whose number is whose.** Because a bullet is a publisher's exact words, it
+carries the publisher's figures too — and a headline is frozen at the moment
+it was filed. On a day that keeps running, an 11am story saying *"CrowdStrike
+Shares Rise 4.6%"* ends up printed beneath our own close-to-close **+13.85%**.
+That happened, and the reader's conclusion was reasonable: he asked whether the
+agent was pulling outdated data. It was not — our price was right and the
+headline was old — but nothing in the email said whose number was whose.
+
+So headlines are now quoted and attributed (`Yahoo: "…"`) while filings stay in
+our own voice, a filing being the company speaking rather than someone
+reporting on it. And when a headline states a same-session share move that
+contradicts ours, the bullet carries a note naming the difference. The headline
+is never dropped: the news in it is still news, and only its number needed
+explaining.
+
+Deciding that a percentage *is* a share-price move is the delicate part, since
+wrongly annotating a correct headline is worse than missing a stale one. A
+figure counts only when a price verb attaches to shares or stock, or to the
+company as the subject of the sentence; the words touching the figure decide,
+not the whole headline, because a cause clause routinely mentions earnings
+("Shares Rise 8% on Strong Revenue") without making the figure anything other
+than a price move. Period qualifiers (`YTD`, `year-over-year`) and non-price
+subjects (`revenue`, `ARR`, `margin`) disqualify it, bare *up*/*down* count
+only with shares or stock named, and only the first clause of a roundup is
+read — `Corning Tumbles 12%; Coherent Sinks 11%` is one story about Corning. A
+figure within 3 points of ours is treated as the same event and left alone.
+
 Tickers with no US filings (foreign private issuers like `ASML` and `BABA`,
 ETFs like `FBTC`, OTC symbols like `HYMLF`) simply have no CIK in EDGAR and are
 skipped; crypto pairs have neither news feed nor filings.

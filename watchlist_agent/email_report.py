@@ -37,17 +37,41 @@ COMMAND_HINT = (
 )
 
 
+def _bullet_label(bullet: Bullet) -> str:
+    """A bullet as plain text, attributed when the words are someone else's.
+
+    A filing is the company speaking and reads as a statement of fact. A
+    headline is a publisher's wording, including any figure in it, so it is
+    quoted and credited rather than set in our own voice.
+    """
+    if not bullet.source:
+        return bullet.text
+    return f'{bullet.source}: "{bullet.text}"'
+
+
 def _bullet_rows(bullets: list[Bullet], muted: str) -> str:
     """Material news and filings shown beneath the move that prompted them."""
     if not bullets:
         return ""
     items = []
     for b in bullets:
-        label = escape(b.text)
+        label = escape(f'"{b.text}"' if b.source else b.text)
         if b.url:
             label = (
                 f'<a href="{escape(b.url, quote=True)}" '
                 f'style="color:#1a4fa0;text-decoration:none;">{label}</a>'
+            )
+        if b.source:
+            # Attribution first, so the eye meets the publisher before the
+            # claim. A quoted headline under our own figure was read as ours.
+            label = (
+                f'<span style="color:{muted};font-weight:600;">'
+                f'{escape(b.source)}:</span> {label}'
+            )
+        if b.note:
+            label += (
+                f'<div style="color:{muted};font-size:11.5px;font-style:italic;'
+                f'margin:1px 0 0;">{escape(b.note)}</div>'
             )
         items.append(f'<li style="margin:0 0 3px;">{label}</li>')
     return (
@@ -106,7 +130,9 @@ def render_text(
             )
             lines.append(f"      {m.reason}")
             for b in research.get(m.ticker, []):
-                lines.append(f"        - {b.text}")
+                lines.append(f"        - {_bullet_label(b)}")
+                if b.note:
+                    lines.append(f"          ({b.note})")
                 if b.url:
                     lines.append(f"          {b.url}")
         if overflow:
