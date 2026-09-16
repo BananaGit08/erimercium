@@ -182,6 +182,13 @@ class Bullet:
     url: str
     score: int
     kind: str  # "filing" or "news"
+    # The outlet, for news. Kept separate from the text so the digest can
+    # attribute the quote rather than blurring it into our own prose -- a
+    # reader took a headline's figure for ours and reported the agent broken.
+    source: str = ""
+    # Set when the headline asserts a price move that our own close-to-close
+    # figure contradicts. Displayed beside it, never silently dropped.
+    note: str = ""
 
     @property
     def sort_key(self) -> tuple[int, int]:
@@ -219,3 +226,123 @@ def describe_filing(form: str, items: str = "") -> str | None:
         # No item codes supplied: report it rather than guess it is routine.
         return "material event (items not specified)"
     return None
+
+
+# --- headlines that state a price move of their own ------------------------
+#
+# A headline is frozen at the moment it was written. On a big day the wires
+# publish at 11am ("Shares Rise 4.6%") and the stock keeps going, so by the
+# close the quoted figure is badly stale. Printed directly beneath our own
+# close-to-close number it reads as the digest contradicting itself, which is
+# exactly how a reader took it: he saw 4.6% under our +13.85% and asked whether
+# the data was outdated. Ours was right and the headline was old.
+
+_UP_VERBS = (
+    "rise", "rises", "rose", "rising", "jump", "jumps", "jumped", "surge",
+    "surges", "surged", "climb", "climbs", "climbed", "soar", "soars",
+    "soared", "rally", "rallies", "rallied", "gain", "gains", "gained",
+    "advance", "advances", "advanced", "pop", "pops", "popped", "spike",
+    "spikes", "spiked",
+)
+_DOWN_VERBS = (
+    "fall", "falls", "fell", "falling", "drop", "drops", "dropped", "sink",
+    "sinks", "sank", "slide", "slides", "slid", "tumble", "tumbles",
+    "tumbled", "plunge", "plunges", "plunged", "slump", "slumps", "slumped",
+    "dive", "dives", "dived", "retreat", "retreats", "retreated", "decline",
+    "declines", "declined", "shed", "sheds",
+)
+# "Shares up 7%" is a price move; "Ramps up 20% of capacity" and "Steps up 15%
+# buyback" are not. Bare up/down carry no sense of price on their own, so they
+# count only where shares or stock is named as the subject.
+_WEAK_VERBS = {"up": 1, "down": -1}
+_MOVE_VERBS = {v: 1 for v in _UP_VERBS} | {v: -1 for v in _DOWN_VERBS}
+_SUBJECT_VERB_ALT = "|".join(sorted(_MOVE_VERBS, key=len, reverse=True))
+_SHARE_VERB_ALT = "|".join(
+    sorted(_MOVE_VERBS | _WEAK_VERBS, key=len, reverse=True)
+)
+
+# "Shares Rise 4.6%", "stock drops 9%" -- the subject is explicit.
+_SHARE_MOVE_RE = re.compile(
+    rf"\b(?:shares?|stock)\s+(?:are\s+|is\s+|were\s+|was\s+)?"
+    rf"(?P<verb>{_SHARE_VERB_ALT})\s+(?:by\s+)?(?P<pct>\d+(?:\.\d+)?)\s*%",
+    re.IGNORECASE,
+)
+# "Corning Tumbles 12% on ...", "HPE and Dell Surge 11% as ..." -- the company
+# itself is the subject, so this is anchored to the start of the headline.
+_SUBJECT_MOVE_RE = re.compile(
+    rf"^.{{0,60}}?\b(?P<verb>{_SUBJECT_VERB_ALT})\s+(?:by\s+)?"
+    rf"(?P<pct>\d+(?:\.\d+)?)\s*%",
+    re.IGNORECASE,
+)
+
+# A percentage is not this session's price move when the quantity it measures
+# is something else, or when it covers a different period. Both are checked
+# against the words touching the figure rather than the whole headline: the
+# cause clause routinely mentions earnings or guidance ("Shares Rise 8% on
+# Strong Revenue") without making the figure anything other than a price move.
+_NON_PRICE_SUBJECT = re.compile(
+    r"\b(?:revenues?|sales|growth|margins?|arr|earnings|eps|profits?|income|"
+    r"guidance|targets?|dividends?|yields?|capex|backlog|bookings|"
+    r"subscribers?|users?|headcount|orders?|deliveries|shipments|output|"
+    r"inflation|rates?|tariffs?)\s*$",
+    re.IGNORECASE,
+)
+_PERIOD_QUALIFIER = re.compile(
+    r"^\W{0,3}(?:ytd\b|year[- ]to[- ]date|this (?:year|week|month|quarter)|"
+    r"last (?:year|week|month|quarter)|so far|since\b|year[- ]over[- ]year|"
+    r"y/y|yoy|in \d{4}|for the (?:year|quarter|month)|annually)",
+    re.IGNORECASE,
+)
+
+
+def stated_day_move(headline: str) -> float | None:
+    """The same-session share move a headline asserts, as a signed percent.
+
+    None when the headline makes no such claim, which is the common case and
+    the safe one. Only the first clause is read: roundups chain several
+    companies ("Corning Tumbles 12%; Coherent Sinks 11%, Lumentum Drops 9%")
+    and only the first is the subject of the piece.
+    """
+    if not headline:
+        return None
+    lead = headline.split(";", 1)[0]
+
+    match = _SHARE_MOVE_RE.search(lead) or _SUBJECT_MOVE_RE.search(lead)
+    if not match:
+        return None
+    # What the figure measures, from the words immediately before the verb,
+    # and what period it covers, from those immediately after the number.
+    if _NON_PRICE_SUBJECT.search(lead[: match.start("verb")].rstrip()):
+        return None
+    if _PERIOD_QUALIFIER.match(lead[match.end():]):
+        return None
+
+    verb = match.group("verb").lower()
+    direction = _MOVE_VERBS.get(verb) or _WEAK_VERBS.get(verb)
+    if direction is None:
+        return None
+    try:
+        return direction * float(match.group("pct"))
+    except ValueError:
+        return None
+
+
+# How far a headline's figure may sit from ours before it reads as a
+# contradiction. An intraday print of 12% against a 13.7% close is the same
+# story; 4.6% against 13.85% is not.
+MOVE_CONFLICT_POINTS = 3.0
+
+
+def conflicting_move(headline: str, actual_pct: float) -> float | None:
+    """The headline's stale figure, when it contradicts our own move.
+
+    Returns None when the headline claims nothing, or claims something close
+    enough to ours to read as the same event.
+    """
+    stated = stated_day_move(headline)
+    if stated is None:
+        return None
+    same_direction = (stated >= 0) == (actual_pct >= 0)
+    if same_direction and abs(stated - actual_pct) < MOVE_CONFLICT_POINTS:
+        return None
+    return stated

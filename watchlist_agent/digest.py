@@ -14,7 +14,7 @@ from .email_report import render_html, render_text, send_email, subject_line
 from .earnings import fetch_calendar, for_watchlist
 from .movers import select_movers, split_for_email
 from .prices import fetch_quotes
-from .research import gather
+from .research import flag_stale_moves, gather
 from .volatility import coverage_warning, fetch_sigmas
 from .watchlist import Watchlist
 
@@ -107,7 +107,9 @@ def build_digest(dry_run: bool = False) -> int:
     for m in movers:
         log.info("  %s %+.2f%% — %s", m.ticker, m.change_pct, m.reason)
 
-    research = gather([m.ticker for m in shown])
+    # A headline's own percentage, quoted from earlier in the session, reads
+    # as a contradiction when it sits under our close-to-close figure.
+    research = flag_stale_moves(gather([m.ticker for m in shown]), shown)
     earnings = upcoming_earnings(tickers)
 
     subject = subject_line(shown, when)

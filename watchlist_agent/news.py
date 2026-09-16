@@ -68,10 +68,17 @@ def fetch_news(
             # anything the company actually did outrank it.
             score = max(1, score // 3)
         seen.add(key)
-        source = (article.get("source") or "").strip()
-        text = f"{headline} ({source})" if source else headline
+        # The outlet rides alongside the headline rather than inside it. The
+        # digest quotes and attributes it, so a reader can tell a publisher's
+        # words -- and a publisher's numbers -- from our own.
         bullets.append(
-            Bullet(text=text, url=article.get("url") or "", score=score, kind="news")
+            Bullet(
+                text=headline,
+                url=article.get("url") or "",
+                score=score,
+                kind="news",
+                source=(article.get("source") or "").strip(),
+            )
         )
 
     log.info(
