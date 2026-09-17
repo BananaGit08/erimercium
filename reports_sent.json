@@ -26,7 +26,9 @@
     "COST": "2026-09-15",
     "CPNG": "2026-09-15",
     "CRM": "2026-09-16",
-    "CRWD": "2026-09-16"
+    "CRWD": "2026-09-16",
+    "CRWV": "2026-09-17",
+    "CSCO": "2026-09-17"
   },
   "calls": {
     "ADBE": {
@@ -146,6 +148,13 @@
     },
     "AVGO": {
       "2026Q3": "2026-08-31"
+    },
+    "COST": {
+      "2026Q4": {
+        "grade": "B",
+        "sent": "2026-09-17",
+        "sentiment": "- Consensus remains a Buy: S&P Global-polled analysts show a Buy consensus with an average target near $1,077, while MarketBeat's tally in mid-September showed around 22 Buy ratings, 12 Hold ratings and one Sell rating, resulting in a consensus Moderate Buy recommendation and an "
+      }
     },
     "DELL": {
       "2027Q2": "2026-08-31"
