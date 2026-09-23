@@ -34,7 +34,9 @@
     "DELL": "2026-09-21",
     "DHR": "2026-09-21",
     "DIS": "2026-09-22",
-    "DJT": "2026-09-22"
+    "DJT": "2026-09-22",
+    "DOCU": "2026-09-23",
+    "ENPH": "2026-09-23"
   },
   "calls": {
     "ADBE": {
@@ -176,6 +178,13 @@
         "grade": "C",
         "sent": "2026-09-02",
         "sentiment": "- Sentiment has been drifting more cautious into the print: as of late August the average rating had moved to \"Reduce\" per MarketBeat's tracking, a step down from the \"Hold\" consensus that had prevailed earlier in the year.\n- Cuts have outnumbered raises recently \u2014 Jefferies reit"
+      }
+    },
+    "MU": {
+      "2026Q4": {
+        "grade": "B+",
+        "sent": "2026-09-23",
+        "sentiment": "- Consensus remains strongly bullish: 49 analysts polled by S&P Global rate Micron a \"Strong Buy\" with an average price target of $1,515, implying roughly 38% upside, and a separate TipRanks-based survey put the average target near $1,564 with about 48% implied upside.\n- Sentimen"
       }
     },
     "ORCL": {
