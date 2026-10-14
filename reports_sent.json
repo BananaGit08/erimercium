@@ -95,6 +95,12 @@
         "source": "transcript"
       }
     },
+    "BAC": {
+      "2026Q3": {
+        "at": "2026-10-14",
+        "source": "release"
+      }
+    },
     "COST": {
       "2026Q4": {
         "at": "2026-09-30",
