@@ -143,8 +143,8 @@
     },
     "GE": {
       "2026Q3": {
-        "at": "2026-10-20",
-        "source": "release"
+        "at": "2026-10-22",
+        "source": "transcript"
       }
     },
     "HPE": {
@@ -197,8 +197,8 @@
     },
     "NFLX": {
       "2026Q3": {
-        "at": "2026-10-20",
-        "source": "release"
+        "at": "2026-10-22",
+        "source": "transcript"
       }
     },
     "ORCL": {
