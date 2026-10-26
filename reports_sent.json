@@ -141,8 +141,8 @@
     },
     "DHR": {
       "2026Q3": {
-        "at": "2026-10-21",
-        "source": "release"
+        "at": "2026-10-26",
+        "source": "transcript"
       }
     },
     "DOCU": {
@@ -189,8 +189,8 @@
     },
     "META": {
       "2026Q3": {
-        "at": "2026-10-21",
-        "source": "release"
+        "at": "2026-10-26",
+        "source": "transcript"
       }
     },
     "MRVL": {
@@ -245,6 +245,12 @@
       "2026Q3": {
         "at": "2026-10-20",
         "source": "release"
+      }
+    },
+    "SPOT": {
+      "2026Q3": {
+        "at": "2026-10-26",
+        "source": "transcript"
       }
     },
     "TSLA": {
