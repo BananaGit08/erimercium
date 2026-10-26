@@ -119,8 +119,8 @@
     },
     "BE": {
       "2026Q3": {
-        "at": "2026-10-22",
-        "source": "release"
+        "at": "2026-10-26",
+        "source": "transcript"
       }
     },
     "BETR": {
@@ -233,8 +233,8 @@
     },
     "QS": {
       "2026Q3": {
-        "at": "2026-10-21",
-        "source": "release"
+        "at": "2026-10-26",
+        "source": "transcript"
       }
     },
     "SNOW": {
@@ -257,8 +257,8 @@
     },
     "TSLA": {
       "2026Q3": {
-        "at": "2026-10-21",
-        "source": "release"
+        "at": "2026-10-26",
+        "source": "transcript"
       }
     },
     "WDAY": {
