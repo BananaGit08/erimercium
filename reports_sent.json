@@ -341,6 +341,18 @@
         "source": "release"
       }
     },
+    "SBUX": {
+      "2026Q4": {
+        "at": "2026-10-30",
+        "source": "release"
+      }
+    },
+    "SNDK": {
+      "2027Q1": {
+        "at": "2026-10-30",
+        "source": "release"
+      }
+    },
     "SNOW": {
       "2027Q2": {
         "at": "2026-09-02",
@@ -369,6 +381,12 @@
       "2026Q3": {
         "at": "2026-10-26",
         "source": "transcript"
+      }
+    },
+    "TWLO": {
+      "2026Q3": {
+        "at": "2026-10-30",
+        "source": "release"
       }
     },
     "WDAY": {
