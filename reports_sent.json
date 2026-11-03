@@ -88,7 +88,9 @@
     "SMCI": "2026-10-30",
     "SNDK": "2026-10-30",
     "SNOW": "2026-11-02",
-    "SPCX": "2026-11-02"
+    "SPCX": "2026-11-02",
+    "SPOT": "2026-11-03",
+    "TDOC": "2026-11-03"
   },
   "calls": {
     "AAPL": {
@@ -478,6 +480,13 @@
         "grade": "B",
         "sent": "2026-09-17",
         "sentiment": "- Consensus remains a Buy: S&P Global-polled analysts show a Buy consensus with an average target near $1,077, while MarketBeat's tally in mid-September showed around 22 Buy ratings, 12 Hold ratings and one Sell rating, resulting in a consensus Moderate Buy recommendation and an "
+      }
+    },
+    "CRWV": {
+      "2026Q3": {
+        "grade": "C",
+        "sent": "2026-11-03",
+        "sentiment": "- Coverage remains net bullish but increasingly split: aggregated data shows 42 analysts rate the stock Buy on average with a 12-month price target of $134.58, while a separate tracker puts the consensus at Moderate Buy with an average price target of $130.92.\n- The trend in pric"
       }
     },
     "DELL": {
