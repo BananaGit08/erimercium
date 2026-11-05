@@ -92,7 +92,9 @@
     "SPOT": "2026-11-03",
     "TDOC": "2026-11-03",
     "TEM": "2026-11-04",
-    "TGT": "2026-11-04"
+    "TGT": "2026-11-04",
+    "TSLA": "2026-11-05",
+    "TWLO": "2026-11-05"
   },
   "calls": {
     "AAPL": {
@@ -537,6 +539,13 @@
     "AVGO": {
       "2026Q3": "2026-08-31"
     },
+    "CBRS": {
+      "2026Q3": {
+        "grade": "C",
+        "sent": "2026-11-05",
+        "sentiment": "- Coverage remains net bullish: multiple trackers show a consensus of \"Strong Buy\" or \"Moderate Buy\" across roughly 10\u201314 analysts, with average 12-month price targets clustering between about $275 and $290.\n- Despite the bullish ratings, price targets have been cut meaningfully "
+      }
+    },
     "COST": {
       "2026Q4": {
         "grade": "B",
@@ -549,6 +558,13 @@
         "grade": "C",
         "sent": "2026-11-03",
         "sentiment": "- Coverage remains net bullish but increasingly split: aggregated data shows 42 analysts rate the stock Buy on average with a 12-month price target of $134.58, while a separate tracker puts the consensus at Moderate Buy with an average price target of $130.92.\n- The trend in pric"
+      }
+    },
+    "CSCO": {
+      "2027Q1": {
+        "grade": "B-",
+        "sent": "2026-11-05",
+        "sentiment": "- Sentiment is split and moving in opposite directions simultaneously: Bank of America's Tal Liani reiterated a Buy with a $150 price target as recently as November 3, while Morgan Stanley's Meta Marshall cut Cisco to Equal-weight from Overweight on November 5 and lowered her tar"
       }
     },
     "DELL": {
@@ -572,6 +588,13 @@
         "grade": "B+",
         "sent": "2026-09-23",
         "sentiment": "- Consensus remains strongly bullish: 49 analysts polled by S&P Global rate Micron a \"Strong Buy\" with an average price target of $1,515, implying roughly 38% upside, and a separate TipRanks-based survey put the average target near $1,564 with about 48% implied upside.\n- Sentimen"
+      }
+    },
+    "ONDS": {
+      "2026Q3": {
+        "grade": "C+",
+        "sent": "2026-11-05",
+        "sentiment": "- Coverage is heavily tilted bullish: according to 10 analysts, the average rating for ONDS stock is \"Strong Buy,\" with a 12-month price target of $18.88, an increase of 258.25% from the recent price. The spread of targets runs from $13 to $25.\n- Recent actions have kept lifting "
       }
     },
     "ORCL": {
