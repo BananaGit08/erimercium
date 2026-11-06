@@ -293,10 +293,20 @@
         "source": "release"
       }
     },
+    "IONQ": {
+      "2026Q3": {
+        "at": "2026-11-06",
+        "source": "release"
+      }
+    },
     "IREN": {
       "2026Q4": {
         "at": "2026-09-02",
         "source": "missed"
+      },
+      "2027Q1": {
+        "at": "2026-11-06",
+        "source": "release"
       }
     },
     "JNJ": {
@@ -374,6 +384,12 @@
     "ON": {
       "2026Q3": {
         "at": "2026-11-02",
+        "source": "release"
+      }
+    },
+    "OPEN": {
+      "2026Q3": {
+        "at": "2026-11-06",
         "source": "release"
       }
     },
