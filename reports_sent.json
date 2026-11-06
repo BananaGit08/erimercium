@@ -101,8 +101,8 @@
   "calls": {
     "AAPL": {
       "2026Q4": {
-        "at": "2026-11-02",
-        "source": "release"
+        "at": "2026-11-06",
+        "source": "transcript"
       }
     },
     "ABNB": {
@@ -347,6 +347,12 @@
         "source": "transcript"
       }
     },
+    "MRNA": {
+      "2026Q3": {
+        "at": "2026-11-06",
+        "source": "release"
+      }
+    },
     "MRVL": {
       "2027Q2": {
         "at": "2026-09-02",
@@ -428,6 +434,12 @@
     "Q": {
       "2026Q3": {
         "at": "2026-11-04",
+        "source": "release"
+      }
+    },
+    "QNT": {
+      "2026Q3": {
+        "at": "2026-11-06",
         "source": "release"
       }
     },
