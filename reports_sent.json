@@ -656,6 +656,13 @@
     "PATH": {
       "2027Q2": "2026-08-31"
     },
+    "RCAT": {
+      "2026Q3": {
+        "grade": "C",
+        "sent": "2026-11-09",
+        "sentiment": "- Coverage is still net-bullish on ratings but splitting on price targets: recent actions include HC Wainwright restated a \"buy\" rating and issued a $20.00 price target on shares of Red Cat in a research report on Friday, August 7th, and Needham & Company LLC reissued a \"buy\" rat"
+      }
+    },
     "SNOW": {
       "2027Q2": "2026-08-31"
     }
